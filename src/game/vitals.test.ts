@@ -29,3 +29,11 @@ describe("vitals", () => {
     expect(isDead(v)).toBe(true);
   });
 });
+
+describe("nap", () => {
+  it("napping in a house bed restores full health and costs 10 hunger", async () => {
+    const { nap } = await import("./vitals");
+    expect(nap({ health: 20, hunger: 50 })).toEqual({ health: 100, hunger: 40 });
+    expect(nap({ health: 20, hunger: 5 })).toEqual({ health: 100, hunger: 0 });
+  });
+});

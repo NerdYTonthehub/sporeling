@@ -38,3 +38,14 @@ describe("fishing", () => {
     expect(removeFish(inv, "carp")).toEqual({});
   });
 });
+
+describe("money", () => {
+  it("giving a fish to the light pays coins, rarer fish pay more", async () => {
+    const { releaseReward } = await import("./fishing");
+    expect(releaseReward("minnow")).toBe(2);
+    expect(releaseReward("perch")).toBe(4);
+    expect(releaseReward("carp")).toBe(8);
+    expect(releaseReward("glowfin")).toBe(15);
+    expect(releaseReward("golden")).toBe(40);
+  });
+});
