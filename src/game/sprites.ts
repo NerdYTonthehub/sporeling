@@ -72,6 +72,8 @@ export interface PersonOpts {
   blink?: boolean;
   /** Both arms raised high above the cap (holding something up). */
   armsUp?: boolean;
+  /** side (default), front = facing the camera, back = facing away (top-down rooms). */
+  view?: "side" | "front" | "back";
 }
 
 /** A tiny mushroom person. (x, y) = feet position (y is the ground row). */
@@ -97,7 +99,7 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
     parts.push([x - 2, bodyBottom, 1, 2, LEG], [x + 1, bodyBottom, 1, 2, LEG]);
     parts.push([x - 3, bodyBottom + 2, 2, 1, SHOE], [x + 1, bodyBottom + 2, 2, 1, SHOE]);
   } else {
-    const a = Math.round(sw * 1.4);
+    const a = o.view && o.view !== "side" ? 0 : Math.round(sw * 1.4);
     const liftA = sw > 0.5 ? 1 : 0;
     const liftB = sw < -0.5 ? 1 : 0;
     const lx = x - 2 + a;
@@ -161,8 +163,12 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
     if (capH > 4) rect(ctx, SPOT, x - 1, capTop + capH - 2, 2, 1);
   }
   // face
+  if (o.view === "back") {
+    rect(ctx, BODY_SH, bl + 1, bodyTop + 2, bodyW - 2, 1);
+    return;
+  }
   const ey = bodyTop + 2;
-  const ex = x + f;
+  const ex = o.view === "front" ? x : x + f;
   if (o.blink) {
     rect(ctx, OUTLINE, ex - 2, ey + 1, 1, 1);
     rect(ctx, OUTLINE, ex + 1, ey + 1, 1, 1);
