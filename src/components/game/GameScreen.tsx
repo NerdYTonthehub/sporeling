@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, VIEW_H, type HudState, type Key } from "@/game/engine";
 import { initAudio, setMuted } from "@/game/sfx";
 import { PixelIcon } from "./PixelIcon";
+import { InventoryPanel } from "./Inventory";
 
 const KEYMAP: Record<string, Key> = {
   ArrowLeft: "left",
@@ -50,6 +51,13 @@ export function GameScreen() {
   const [muted, setMutedState] = useState(false);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [touch, setTouch] = useState(false);
+  const [invOpen, setInvOpen] = useState(false);
+  const invOpenRef = useRef(false);
+  const startedRef = useRef(false);
+  const deadRef = useRef(false);
+  invOpenRef.current = invOpen;
+  startedRef.current = started;
+  deadRef.current = !!hud?.dead;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -73,6 +81,15 @@ export function GameScreen() {
     setTouch(window.matchMedia("(pointer: coarse)").matches);
 
     const down = (e: KeyboardEvent) => {
+      if (e.key === "i" || e.key === "I" || e.key === "Tab" || (e.key === "Escape" && invOpenRef.current)) {
+        e.preventDefault();
+        if (!startedRef.current || deadRef.current) return;
+        const next = e.key === "Escape" ? false : !invOpenRef.current;
+        game.clearKeys();
+        setInvOpen(next);
+        return;
+      }
+      if (invOpenRef.current) return;
       const k = KEYMAP[e.key];
       if (!k) return;
       e.preventDefault();
@@ -104,7 +121,13 @@ export function GameScreen() {
 
   const restart = useCallback(() => {
     initAudio();
+    setInvOpen(false);
     gameRef.current?.restart();
+  }, []);
+
+  const releaseFish = useCallback((id: string) => {
+    initAudio();
+    if (gameRef.current?.releaseFish(id)) setInvOpen(false);
   }, []);
 
   useEffect(() => {
@@ -177,6 +200,16 @@ export function GameScreen() {
                   <span>{hud.timeOfDay}</span>
                   <span>·</span>
                   <span>{hud.applesEaten} apples eaten</span>
+                  <span>·</span>
+                  <button
+                    onClick={() => {
+                      gameRef.current?.clearKeys();
+                      setInvOpen((o) => !o);
+                    }}
+                    className="text-foreground underline-offset-2 hover:underline"
+                  >
+                    fish bag ({hud.inventory.reduce((n, f) => n + f.count, 0)}) · I
+                  </button>
                   <button onClick={toggleMute} className="text-foreground underline-offset-2 hover:underline">
                     {muted ? "sound off" : "sound on"}
                   </button>
@@ -200,6 +233,20 @@ export function GameScreen() {
                 </div>
               )}
 
+              {/* Toast (fishing results etc.) */}
+              {hud.toast && !hud.dialog && (
+                <div key={hud.toast} className="pixel-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 px-4 py-2 text-2xl text-foreground">
+                  {hud.toast}
+                </div>
+              )}
+
+              {/* Bite! */}
+              {hud.fishing === "bite" && (
+                <div className="animate-blink pointer-events-none absolute left-1/2 top-[40%] -translate-x-1/2 font-display text-2xl text-accent drop-shadow-[3px_3px_0_var(--color-border)]">
+                  SPACE!
+                </div>
+              )}
+
               {/* Dialog */}
               {hud.dialog ? (
                 <div className="pixel-panel absolute left-1/2 top-[20%] w-[min(92%,640px)] -translate-x-1/2 px-4 py-3">
@@ -215,6 +262,10 @@ export function GameScreen() {
                     {hud.prompt}
                   </div>
                 )
+              )}
+
+              {invOpen && !hud.dead && (
+                <InventoryPanel hud={hud} onRelease={releaseFish} onClose={() => setInvOpen(false)} />
               )}
 
               {/* Game over */}
@@ -259,7 +310,9 @@ export function GameScreen() {
                   <span className="text-accent">S / ↓</span>
                   <span>drop down</span>
                   <span className="text-accent">E</span>
-                  <span>eat · talk</span>
+                  <span>eat · talk · fish</span>
+                  <span className="text-accent">I</span>
+                  <span>fish bag</span>
                 </div>
               </div>
             </div>
@@ -277,6 +330,13 @@ export function GameScreen() {
                 </button>
               </div>
               <div className="absolute bottom-4 right-4 flex gap-3">
+                <button
+                  aria-label="Open fish bag"
+                  className="pixel-btn h-14 w-14 touch-none text-xs"
+                  onClick={() => setInvOpen((o) => !o)}
+                >
+                  BAG
+                </button>
                 <button aria-label="Eat or talk" className="pixel-btn h-14 w-14 touch-none text-xs" {...hold("act")}>
                   E
                 </button>
