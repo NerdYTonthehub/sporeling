@@ -895,24 +895,24 @@ export class Game {
     const ys: number[] = new Array<number>(W);
     for (let x = 0; x < W; x++) ys[x] = this.groundAt(cx + x) - cy;
     ctx.fillStyle = "#3a2a1f";
-    for (let x = 0; x < W; x++) if (ys[x] < H) ctx.fillRect(x, ys[x], 1, H - ys[x]);
+    for (let x = 0; x < W; x++) if (ys[x]! < H) ctx.fillRect(x, ys[x]!, 1, H - ys[x]!);
     ctx.fillStyle = "#2b1f17";
-    for (let x = 0; x < W; x++) if (ys[x] + 14 < H) ctx.fillRect(x, ys[x] + 14, 1, H - ys[x] - 14);
+    for (let x = 0; x < W; x++) if (ys[x]! + 14 < H) ctx.fillRect(x, ys[x]! + 14, 1, H - ys[x]! - 14);
     ctx.fillStyle = "#3d6e2e";
-    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x] + 2, 1, 2 + (hash1(cx + x, 5) < 0.3 ? 1 : 0));
+    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x]! + 2, 1, 2 + (hash1(cx + x, 5) < 0.3 ? 1 : 0));
     ctx.fillStyle = "#5c9a3c";
-    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x], 1, 2);
+    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x]!, 1, 2);
     ctx.fillStyle = "#86c452";
-    for (let x = 0; x < W; x++) if (hash1(cx + x, 6) < 0.45) ctx.fillRect(x, ys[x], 1, 1);
+    for (let x = 0; x < W; x++) if (hash1(cx + x, 6) < 0.45) ctx.fillRect(x, ys[x]!, 1, 1);
     ctx.fillStyle = "#4d3828";
     for (let x = 0; x < W; x++) {
       const h = hash1(cx + x, 7);
-      if (h < 0.12) ctx.fillRect(x, ys[x] + 6 + Math.floor(h * 100) % 18, 1, 1);
+      if (h < 0.12) ctx.fillRect(x, ys[x]! + 6 + Math.floor(h * 100) % 18, 1, 1);
     }
     ctx.fillStyle = "#1f1610";
     for (let x = 0; x < W; x++) {
       const h = hash1(cx + x, 8);
-      if (h < 0.05) ctx.fillRect(x, ys[x] + 9 + Math.floor(h * 400) % 20, 2, 1);
+      if (h < 0.05) ctx.fillRect(x, ys[x]! + 9 + Math.floor(h * 400) % 20, 2, 1);
     }
   }
 
