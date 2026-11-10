@@ -57,7 +57,7 @@ export function GameScreen() {
     if (!canvas || !wrap) return;
     const game = new Game(canvas, setHud);
     gameRef.current = game;
-    (window as unknown as { __game: Game }).__game = game;
+    if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
     const fit = () => {
       const cw = wrap.clientWidth;
       const ch = wrap.clientHeight;
@@ -184,7 +184,7 @@ export function GameScreen() {
               </div>
 
               {/* Village banner */}
-              {hud.banner && (
+              {hud.banner && !hud.dialog && !hud.dead && (
                 <div key={hud.banner.title} className="animate-banner pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 text-center">
                   <div className="font-display text-xl text-accent drop-shadow-[3px_3px_0_var(--color-border)] sm:text-3xl">
                     {hud.banner.title}
@@ -202,7 +202,7 @@ export function GameScreen() {
 
               {/* Dialog */}
               {hud.dialog ? (
-                <div className="pixel-panel absolute bottom-4 left-1/2 w-[min(92%,640px)] -translate-x-1/2 px-4 py-3">
+                <div className="pixel-panel absolute left-1/2 top-[20%] w-[min(92%,640px)] -translate-x-1/2 px-4 py-3">
                   <div className="font-display text-[11px] text-accent">{hud.dialog.name}</div>
                   <p className="mt-2 text-2xl leading-tight text-foreground">{hud.dialog.text}</p>
                   <div className="mt-1 text-right text-base text-muted-foreground">

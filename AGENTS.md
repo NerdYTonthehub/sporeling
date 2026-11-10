@@ -28,3 +28,9 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+
+- The game runs in a plain canvas engine under `src/game/` (world gen, engine loop, sprites, sfx); React (`src/components/game/`) only renders the HUD/overlays from a throttled `onHud` callback — keeps 60fps rendering out of React.
+- Health/hunger rules live as pure functions in `src/game/vitals.ts` with tests in `vitals.test.ts` — change numbers there, not inside the engine.
+- All game art is drawn procedurally with integer `fillRect`s on a low-res canvas (225px tall) scaled with `image-rendering: pixelated` — keeps a consistent pixel look without sprite assets.
