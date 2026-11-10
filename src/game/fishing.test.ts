@@ -1,0 +1,40 @@
+import { describe, expect, it } from "vitest";
+import { BITE_WINDOW, FISH, addFish, removeFish, resolveBite, rollFish, rollWait } from "./fishing";
+
+describe("fishing", () => {
+  it("pressing space before the ! appears scares the fish", () => {
+    expect(resolveBite("wait", 0, true)).toBe("early");
+    expect(resolveBite("wait", 0, false)).toBe("pending");
+  });
+
+  it("pressing space quickly after the ! catches the fish", () => {
+    expect(resolveBite("bite", 0.3, true)).toBe("caught");
+  });
+
+  it("waiting longer than the bite window lets it get away", () => {
+    expect(resolveBite("bite", BITE_WINDOW + 0.01, false)).toBe("missed");
+    expect(resolveBite("bite", BITE_WINDOW + 0.01, true)).toBe("missed");
+  });
+
+  it("bites come after 2.5 to 6 seconds", () => {
+    expect(rollWait(0)).toBe(2.5);
+    expect(rollWait(1)).toBe(6);
+  });
+
+  it("rolls common fish most of the time and the golden guppy rarely", () => {
+    expect(rollFish(0).id).toBe("minnow");
+    expect(rollFish(0.999).id).toBe("golden");
+    expect(FISH.find((f) => f.id === "golden")!.weight).toBeLessThan(FISH[0]!.weight);
+  });
+
+  it("inventory stacks caught fish and releasing removes one", () => {
+    let inv = addFish({}, "carp");
+    inv = addFish(inv, "carp");
+    expect(inv).toEqual({ carp: 2 });
+    inv = removeFish(inv, "carp");
+    expect(inv).toEqual({ carp: 1 });
+    inv = removeFish(inv, "carp");
+    expect(inv).toEqual({});
+    expect(removeFish(inv, "carp")).toEqual({});
+  });
+});
