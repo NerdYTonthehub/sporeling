@@ -221,6 +221,7 @@ export class Game {
 
     if (active) {
       const dir = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
+      const over = Math.abs(p.vx) > MAX_SPEED;
       if (dir) {
         p.vx += dir * ACCEL * dt;
         p.facing = dir;
@@ -228,8 +229,11 @@ export class Game {
         const fr = FRICTION * dt;
         p.vx = Math.abs(p.vx) <= fr ? 0 : p.vx - Math.sign(p.vx) * fr;
       }
-      if (Math.abs(p.vx) > MAX_SPEED) {
-        p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - MAX_SPEED, 500 * dt);
+      if (over) {
+        // knockback decays back to normal walking speed
+        p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - MAX_SPEED, 900 * dt);
+      } else {
+        p.vx = clamp(p.vx, -MAX_SPEED, MAX_SPEED);
       }
       if (this.pressed.has("jump")) p.jumpBuf = 0.12;
       if (this.pressed.has("down") && p.plat) {
