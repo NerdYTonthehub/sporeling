@@ -90,6 +90,11 @@ export interface Beetle {
   walkT: number;
 }
 
+export interface Puddle {
+  x: number;
+  half: number;
+}
+
 export interface Decor {
   x: number;
   kind: "grass" | "flower" | "fern" | "pebble" | "clover" | "leaf";
@@ -101,6 +106,7 @@ export interface World {
   trees: GiantTree[];
   platforms: Platform[];
   appleTrees: AppleTree[];
+  puddles: Puddle[];
   villages: Village[];
   beetles: Beetle[];
   decor: Decor[];
@@ -189,6 +195,16 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   const villageSpans = VILLAGE_DEFS.map((v) => ({ x: v.x, half: 150 }));
   const inVillage = (x: number, pad = 0) => villageSpans.some((v) => Math.abs(x - v.x) < v.half + pad);
 
+  // Fishing puddles (decided first so the ground can be flattened around them)
+  const puddles: Puddle[] = [];
+  for (let px = 450; px < WORLD_W - 200; ) {
+    if (!inVillage(px, 90)) {
+      puddles.push({ x: Math.round(px), half: Math.round(rr(13, 20)) });
+      px += rr(550, 950);
+    } else px += 50;
+  }
+  const nearPuddle = (x: number, pad: number) => puddles.some((pd) => Math.abs(x - pd.x) < pd.half + pad);
+
   const rawGround = (x: number) =>
     GROUND_BASE + Math.sin(x / 190) * 9 + Math.sin(x / 71 + 1.3) * 4 + Math.sin(x / 523 + 4) * 12;
 
@@ -204,6 +220,15 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
         g = flatY * (1 - s) + g * s;
       }
     }
+    for (const pd of puddles) {
+      const d = Math.abs(x - pd.x);
+      if (d > pd.half + 30) continue;
+      const flatY = rawGround(pd.x);
+      if (d < pd.half + 6) return Math.round(flatY);
+      const t = (d - pd.half - 6) / 24;
+      const sm = t * t * (3 - 2 * t);
+      g = flatY * (1 - sm) + g * sm;
+    }
     return Math.round(g);
   };
 
@@ -213,7 +238,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   let x = 260;
   while (x < WORLD_W - 200) {
     const w = Math.round(rr(70, 130));
-    if (!inVillage(x + w / 2, w / 2 + 20)) {
+    if (!inVillage(x + w / 2, w / 2 + 20) && !puddles.some((pd) => x + w + 45 > pd.x - pd.half && x - 45 < pd.x + pd.half)) {
       const t: GiantTree = { x, w, seed: Math.floor(rnd() * 1e9) };
       trees.push(t);
       // Shelf fungus platforms spiralling up the trunk
@@ -241,7 +266,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   const appleTrees: AppleTree[] = [];
   x = 380;
   while (x < WORLD_W - 100) {
-    if (!inVillage(x, 30) && !trees.some((t) => x > t.x - 30 && x < t.x + t.w + 30)) {
+    if (!inVillage(x, 30) && !nearPuddle(x, 22) && !trees.some((t) => x > t.x - 30 && x < t.x + t.w + 30)) {
       const size = rr(0.85, 1.2);
       const apples = [];
       const n = 3 + Math.floor(rnd() * 3);
@@ -306,7 +331,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   const beetles: Beetle[] = [];
   x = 1100;
   while (x < WORLD_W - 150) {
-    if (!inVillage(x, 120)) {
+    if (!inVillage(x, 120) && !nearPuddle(x, 190)) {
       const range = rr(50, 110);
       beetles.push({
         x,
@@ -328,12 +353,16 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
     const r = rnd();
     const kind: Decor["kind"] =
       r < 0.6 ? "grass" : r < 0.7 ? "flower" : r < 0.78 ? "clover" : r < 0.86 ? "pebble" : r < 0.92 ? "leaf" : "fern";
-    decor.push({ x: dx, kind, v: rnd(), c: Math.floor(rnd() * 4) });
+    const v = rnd();
+    const c = Math.floor(rnd() * 4);
+    if (!nearPuddle(dx, 2)) decor.push({ x: dx, kind, v, c });
   }
   const fgGrass: Decor[] = [];
   for (let dx = 0; dx < WORLD_W; dx += 30 + Math.floor(rnd() * 90)) {
-    fgGrass.push({ x: dx, kind: "grass", v: rnd(), c: Math.floor(rnd() * 3) });
+    const v = rnd();
+    const c = Math.floor(rnd() * 3);
+    if (!nearPuddle(dx, 4)) fgGrass.push({ x: dx, kind: "grass", v, c });
   }
 
-  return { world: { trees, platforms, appleTrees, villages, beetles, decor, fgGrass }, groundY };
+  return { world: { trees, platforms, appleTrees, puddles, villages, beetles, decor, fgGrass }, groundY };
 }
