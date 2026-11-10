@@ -1333,7 +1333,7 @@ export class Game {
     const px = Math.round(this.p.x - cx);
     const py = Math.round(this.p.y - cy);
     ctx.globalCompositeOperation = "lighter";
-    for (const [w, al] of [[30, 0.18], [18, 0.28], [8, 0.4]] as const) {
+    for (const [w, al] of [[30, 0.16], [18, 0.24], [8, 0.34]] as const) {
       const g = ctx.createLinearGradient(px - w / 2, 0, px + w / 2, 0);
       g.addColorStop(0, "rgba(255,215,80,0)");
       g.addColorStop(0.5, `rgba(255,225,110,${(al * a).toFixed(3)})`);
@@ -1341,8 +1341,8 @@ export class Game {
       ctx.fillStyle = g;
       ctx.fillRect(px - w / 2, 0, w, py + 2);
     }
-    glow(px, py - 8, 34, "255,210,90", 0.45 * a);
-    glow(px, py, 22, "255,230,140", 0.35 * a);
+    glow(px, py - 8, 34, "255,210,90", 0.22 * a);
+    glow(px, py + 2, 18, "255,230,140", 0.15 * a);
     const fp = this.releaseFishPos();
     if (fp) glow(fp.x - cx, fp.y - cy, 16, "255,240,170", 0.7 * a * fp.a);
     ctx.globalCompositeOperation = "source-over";
