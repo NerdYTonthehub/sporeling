@@ -7,14 +7,15 @@ export interface FishSpecies {
   belly: string;
   fin: string;
   weight: number; // relative chance of being caught
+  value: number; // coins earned when you give it to the light
 }
 
 export const FISH: FishSpecies[] = [
-  { id: "minnow", name: "Puddle Minnow", body: "#9fb7c4", belly: "#e6eef0", fin: "#6f8a99", weight: 40 },
-  { id: "perch", name: "Mud Perch", body: "#9aa44e", belly: "#e8dda4", fin: "#6a7430", weight: 28 },
-  { id: "carp", name: "Mossy Carp", body: "#4f8a5a", belly: "#b9d8a0", fin: "#2f5e3a", weight: 18 },
-  { id: "glowfin", name: "Glowfin", body: "#5fd6c4", belly: "#d8fff6", fin: "#2f9a8e", weight: 10 },
-  { id: "golden", name: "Golden Guppy", body: "#f2c84b", belly: "#fff1b0", fin: "#d08a2a", weight: 4 },
+  { id: "minnow", name: "Puddle Minnow", body: "#9fb7c4", belly: "#e6eef0", fin: "#6f8a99", weight: 40, value: 2 },
+  { id: "perch", name: "Mud Perch", body: "#9aa44e", belly: "#e8dda4", fin: "#6a7430", weight: 28, value: 4 },
+  { id: "carp", name: "Mossy Carp", body: "#4f8a5a", belly: "#b9d8a0", fin: "#2f5e3a", weight: 18, value: 8 },
+  { id: "glowfin", name: "Glowfin", body: "#5fd6c4", belly: "#d8fff6", fin: "#2f9a8e", weight: 10, value: 15 },
+  { id: "golden", name: "Golden Guppy", body: "#f2c84b", belly: "#fff1b0", fin: "#d08a2a", weight: 4, value: 40 },
 ];
 
 /** Seconds you have to press SPACE after the "!" appears. */
@@ -34,6 +35,9 @@ export function rollFish(r: number): FishSpecies {
   }
   return FISH[FISH.length - 1]!;
 }
+
+/** Coins you get for releasing a fish into the light. */
+export const releaseReward = (id: string) => FISH.find((f) => f.id === id)?.value ?? 0;
 
 export const fishById = (id: string) => FISH.find((f) => f.id === id);
 

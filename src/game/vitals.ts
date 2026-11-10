@@ -40,6 +40,13 @@ export function eatApple(v: Vitals): Vitals {
   };
 }
 
+/** Hunger a nap in a mushroom-house bed costs. A nap restores full health. */
+export const NAP_HUNGER_COST = 10;
+
+export function nap(v: Vitals): Vitals {
+  return { health: MAX_HEALTH, hunger: clamp(v.hunger - NAP_HUNGER_COST, 0, MAX_HUNGER) };
+}
+
 export function takeDamage(v: Vitals, amount: number): Vitals {
   return { ...v, health: clamp(v.health - amount, 0, MAX_HEALTH) };
 }

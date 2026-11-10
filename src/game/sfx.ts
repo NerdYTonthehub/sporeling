@@ -1,6 +1,7 @@
 // Tiny chiptune sound effects with WebAudio. Created lazily after a user gesture.
 let ac: AudioContext | null = null;
 let muted = false;
+let volume = 0.8;
 
 export function initAudio() {
   if (typeof window === "undefined") return;
@@ -19,8 +20,13 @@ export function setMuted(m: boolean) {
   muted = m;
 }
 
+export function setVolume(v: number) {
+  volume = Math.max(0, Math.min(1, v));
+}
+
 function tone(freq: number, dur: number, type: OscillatorType = "square", vol = 0.05, slide = 0, delay = 0) {
-  if (!ac || muted) return;
+  if (!ac || muted || volume <= 0) return;
+  vol *= volume * 1.25;
   const t0 = ac.currentTime + delay;
   const osc = ac.createOscillator();
   const gain = ac.createGain();
@@ -59,6 +65,12 @@ export const sfx = {
   release: () => {
     [523, 659, 784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.35, "triangle", 0.035, 0, i * 0.18));
   },
+  coin: () => {
+    tone(988, 0.07, "square", 0.04);
+    tone(1319, 0.12, "square", 0.04, 0, 0.07);
+  },
+  door: () => tone(220, 0.15, "triangle", 0.05, 80),
+  menu: () => tone(660, 0.05, "square", 0.03),
   die: () => {
     [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, "square", 0.04, -20, i * 0.18));
   },
