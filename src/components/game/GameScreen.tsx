@@ -57,6 +57,7 @@ export function GameScreen() {
     if (!canvas || !wrap) return;
     const game = new Game(canvas, setHud);
     gameRef.current = game;
+    (window as unknown as { __game: Game }).__game = game;
     const fit = () => {
       const cw = wrap.clientWidth;
       const ch = wrap.clientHeight;
