@@ -117,7 +117,7 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
         "Our cousins live in villages far to the east. Go and find them!",
         "Rest by our campfire whenever you feel bruised.",
       ]],
-      ["Pip", "#d9443a", true, 0.85, [
+      ["Pip", "#e07aa0", true, 0.85, [
         "Apples! The little trees grow apples. Press E next to one to munch it.",
         "If your belly runs empty you'll start to feel very poorly.",
       ]],
