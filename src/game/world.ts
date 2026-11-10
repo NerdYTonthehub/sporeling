@@ -269,7 +269,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
         stemH: Math.round(rr(20, 34)),
         capW,
         capH: Math.round(rr(11, 16)),
-        cap: CAPS[Math.floor(rnd() * CAPS.length)],
+        cap: CAPS[Math.floor(rnd() * CAPS.length)] ?? "#d9443a",
         spots: rnd() < 0.5,
       });
     }

@@ -138,8 +138,8 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
     const sh = Math.ceil(w * 0.28);
     rect(ctx, dark, x + w / 2 - sh, capTop + i, sh, 1);
   });
-  rect(ctx, light, x - rows[1] / 2 + 1, capTop + 1, 2, 1);
-  rect(ctx, light, x - rows[2] / 2 + 1, capTop + 2, 1, 1);
+  rect(ctx, light, x - (rows[1] ?? capW) / 2 + 1, capTop + 1, 2, 1);
+  rect(ctx, light, x - (rows[2] ?? capW) / 2 + 1, capTop + 2, 1, 1);
   if (o.spots) {
     rect(ctx, SPOT, x - Math.round(capW * 0.22), capTop + 2, 2, 1);
     rect(ctx, SPOT, x + Math.round(capW * 0.12), capTop + 1, 1, 1);
@@ -269,8 +269,8 @@ export function drawHouse(ctx: Ctx, h: House, sx: number, gy: number, night: num
     const sh = Math.ceil(w * 0.28);
     rect(ctx, dark, x0 + w - sh, capTop + i, sh, 1);
   });
-  rect(ctx, light, Math.round(sx - rows[1] / 2) + 2, capTop + 1, 4, 1);
-  rect(ctx, light, Math.round(sx - rows[2] / 2) + 1, capTop + 2, 2, 1);
+  rect(ctx, light, Math.round(sx - (rows[1] ?? h.capW) / 2) + 2, capTop + 1, 4, 1);
+  rect(ctx, light, Math.round(sx - (rows[2] ?? h.capW) / 2) + 1, capTop + 2, 2, 1);
   rect(ctx, GILL, Math.round(sx - h.capW / 2) + 2, capTop + h.capH, h.capW - 4, 1);
   if (h.spots) {
     const sp = SPOT;

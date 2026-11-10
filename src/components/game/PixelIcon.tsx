@@ -41,9 +41,9 @@ const ICONS: Record<string, { grid: string[]; colors: Record<string, string> }> 
 };
 
 export function PixelIcon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
-  const icon = ICONS[name];
+  const icon = ICONS[name]!;
   const h = icon.grid.length;
-  const w = icon.grid[0].length;
+  const w = icon.grid[0]?.length ?? 0;
   return (
     <svg
       width={(size * w) / h}

@@ -196,7 +196,7 @@ export class Game {
 
   private groundAt(x: number) {
     const i = x < 0 ? 0 : x > WORLD_W ? WORLD_W : x | 0;
-    return this.ground[i];
+    return this.ground[i] ?? GROUND_BASE;
   }
 
   private darkness() {
@@ -523,7 +523,7 @@ export class Game {
         vx: -4 + Math.random() * 10,
         vy: 9 + Math.random() * 7,
         life: 25,
-        color: LEAF_COLORS[Math.floor(Math.random() * LEAF_COLORS.length)],
+        color: LEAF_COLORS[Math.floor(Math.random() * LEAF_COLORS.length)] ?? "#c98a2e",
         size: 1,
         grav: 0,
         kind: "leaf",
@@ -595,7 +595,7 @@ export class Game {
       found: villages.length - undiscovered.length,
       total: villages.length,
       prompt: this.dead || !this.running ? null : this.prompt,
-      dialog: tk ? { name: tk.npc.name, text: tk.npc.lines[tk.idx], page: tk.idx + 1, pages: tk.npc.lines.length } : null,
+      dialog: tk ? { name: tk.npc.name, text: tk.npc.lines[tk.idx] ?? "", page: tk.idx + 1, pages: tk.npc.lines.length } : null,
       banner: this.banner ? { title: this.banner.title, sub: this.banner.sub } : null,
       dead: this.dead,
       timeOfDay: this.timeLabel(),
@@ -876,7 +876,7 @@ export class Game {
     const sx = Math.round(pl.x - cx);
     if (sx > this.W || sx + pl.w < 0) return;
     const sy = Math.round(pl.y - cy);
-    const [base, dark, light] = FUNGUS[pl.color];
+    const [base, dark, light] = (FUNGUS[pl.color] ?? FUNGUS[0]) as [string, string, string];
     const ctx = this.ctx;
     rect(ctx, "#1b140f", sx - 1, sy - 1, pl.w + 2, 3);
     rect(ctx, "#1b140f", sx, sy + 2, pl.w, 2);
@@ -892,7 +892,7 @@ export class Game {
     const ctx = this.ctx;
     const W = this.W;
     const H = this.H;
-    const ys = new Int16Array(W);
+    const ys: number[] = new Array<number>(W);
     for (let x = 0; x < W; x++) ys[x] = this.groundAt(cx + x) - cy;
     ctx.fillStyle = "#3a2a1f";
     for (let x = 0; x < W; x++) if (ys[x] < H) ctx.fillRect(x, ys[x], 1, H - ys[x]);
@@ -976,8 +976,8 @@ export class Game {
           rect(ctx, "#3d7a2e", sx + 1, gy - 1, 1, 1);
           break;
         case "leaf":
-          rect(ctx, LEAF_COLORS[d.c], sx, gy - 1, 3, 1);
-          rect(ctx, LEAF_COLORS[d.c], sx + 1, gy - 2, 1, 1);
+          rect(ctx, LEAF_COLORS[d.c] ?? "#a8642a", sx, gy - 1, 3, 1);
+          rect(ctx, LEAF_COLORS[d.c] ?? "#a8642a", sx + 1, gy - 2, 1, 1);
           break;
       }
     }
@@ -1003,8 +1003,8 @@ export class Game {
     }
     // bunting between lanterns
     const pairs: [number, number][] = [
-      [v.lanterns[0], v.lanterns[1]],
-      [v.lanterns[2], v.lanterns[3]],
+      [v.lanterns[0]!, v.lanterns[1]!],
+      [v.lanterns[2]!, v.lanterns[3]!],
     ];
     const flagCols = ["#d9443a", "#f2c84b", "#5fae8a", "#efe6d2"];
     for (const [a, b] of pairs) {
@@ -1015,7 +1015,7 @@ export class Game {
         const y = Math.round(gy - 24 + Math.sin(k * Math.PI) * 6);
         rect(ctx, "#3a2a1f", x, y, 1, 1);
         if ((x - Math.ceil(ax)) % 6 === 3) {
-          const c = flagCols[Math.floor((x - ax) / 6) % flagCols.length];
+          const c = flagCols[Math.floor((x - ax) / 6) % flagCols.length] ?? "#d9443a";
           rect(ctx, c, x - 1, y + 1, 3, 2);
           rect(ctx, c, x, y + 3, 1, 1);
         }
