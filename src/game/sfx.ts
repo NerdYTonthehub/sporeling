@@ -47,6 +47,18 @@ export const sfx = {
   discover: () => {
     [392, 494, 587, 784].forEach((f, i) => tone(f, 0.18, "triangle", 0.05, 0, i * 0.11));
   },
+  bite: () => {
+    tone(880, 0.06, "square", 0.05);
+    tone(1175, 0.08, "square", 0.05, 0, 0.08);
+  },
+  cast: () => tone(500, 0.18, "triangle", 0.04, -300),
+  splash: () => tone(140, 0.2, "triangle", 0.05, -60),
+  caught: () => {
+    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, "square", 0.04, 0, i * 0.07));
+  },
+  release: () => {
+    [523, 659, 784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.35, "triangle", 0.035, 0, i * 0.18));
+  },
   die: () => {
     [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, "square", 0.04, -20, i * 0.18));
   },

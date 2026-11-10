@@ -1,5 +1,6 @@
 // Pixel-art drawing helpers. Everything is drawn with integer fillRects on a low-res canvas.
 import type { House } from "./world";
+import { FISH_H, FISH_W, fishPixels, type FishSpecies } from "./fishing";
 
 type Ctx = CanvasRenderingContext2D;
 type R = [number, number, number, number, string];
@@ -69,6 +70,8 @@ export interface PersonOpts {
   spots: boolean;
   scale?: number;
   blink?: boolean;
+  /** Both arms raised high above the cap (holding something up). */
+  armsUp?: boolean;
 }
 
 /** A tiny mushroom person. (x, y) = feet position (y is the ground row). */
@@ -106,7 +109,18 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
   parts.push([bl, bodyTop, bodyW, bodyH, BODY]);
   // arms
   const ay = bodyTop + 2;
-  if (o.air) {
+  const capTopY = bodyTop + 1 - Math.max(4, Math.round(6 * s));
+  if (o.armsUp) {
+    const half = capW / 2;
+    for (const side of [-1, 1]) {
+      const sx = side < 0 ? bl - 1 : bl + bodyW;
+      // out from the shoulder past the cap brim, then up, then in towards the head
+      for (let i = 0; i < 4; i++) parts.push([sx + side * i, ay - i, 1, 1, BODY]);
+      const outX = side < 0 ? x - half - 1 : x + half;
+      parts.push([outX, capTopY - 1, 1, ay - 3 - capTopY + 2, BODY]);
+      parts.push([outX - side, capTopY - 2, 1, 1, BODY], [outX - side * 2, capTopY - 3, 1, 1, BODY]);
+    }
+  } else if (o.air) {
     parts.push([bl - 1, ay - 1, 1, 2, BODY], [bl - 2, ay - 3, 1, 2, BODY]);
     parts.push([bl + bodyW, ay - 1, 1, 2, BODY], [bl + bodyW + 1, ay - 3, 1, 2, BODY]);
   } else {
@@ -278,5 +292,23 @@ export function drawHouse(ctx: Ctx, h: House, sx: number, gy: number, night: num
     rect(ctx, sp, Math.round(sx + h.capW * 0.05), capTop + 1, 2, 2);
     rect(ctx, sp, Math.round(sx + h.capW * 0.28), capTop + 4, 2, 1);
     rect(ctx, sp, Math.round(sx - h.capW * 0.08), capTop + h.capH - 3, 2, 1);
+  }
+}
+
+/** Draws a small fish centered on (x, y). */
+export function drawFish(ctx: Ctx, x: number, y: number, sp: FishSpecies, facing = 1) {
+  const ox = Math.round(x - FISH_W / 2);
+  const oy = Math.round(y - FISH_H / 2);
+  for (const [px, py, c] of fishPixels(sp, facing)) {
+    ctx.fillStyle = c;
+    ctx.fillRect(ox + px, oy + py, 1, 1);
+  }
+}
+
+export function drawLine(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, color: string) {
+  ctx.fillStyle = color;
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+  for (let i = 0; i <= n; i++) {
+    ctx.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), 1, 1);
   }
 }

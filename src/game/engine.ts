@@ -1,5 +1,6 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
-import { appleTreeGeom, drawAppleTree, drawBeetle, drawHouse, drawMushroomPerson, fillCircle, rect } from "./sprites";
+import { appleTreeGeom, drawAppleTree, drawBeetle, drawFish, drawHouse, drawLine, drawMushroomPerson, fillCircle, rect } from "./sprites";
+import { FISH, addFish, fishById, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
 import { sfx } from "./sfx";
 import { eatApple, isDead, takeDamage, tickVitals, type Vitals } from "./vitals";
 import {
@@ -11,6 +12,7 @@ import {
   type GiantTree,
   type Npc,
   type Platform,
+  type Puddle,
   type Village,
   type World,
 } from "./world";
@@ -25,6 +27,7 @@ const APPLE_REGROW = 25;
 const BEETLE_DAMAGE = 15;
 const DAY_LENGTH = 240;
 const START_X = 230;
+const RELEASE_TIME = 3.6;
 
 export type Key = "left" | "right" | "jump" | "down" | "act";
 
@@ -42,6 +45,12 @@ export interface HudState {
   resting: boolean;
   starving: boolean;
   applesEaten: number;
+  fishing: "wait" | "bite" | null;
+  releasing: boolean;
+  toast: string | null;
+  inventory: { id: string; name: string; count: number }[];
+  fishCaught: number;
+  fishReleased: number;
 }
 
 interface Particle {
@@ -54,7 +63,7 @@ interface Particle {
   color: string;
   size: number;
   grav: number;
-  kind: "leaf" | "spark" | "smoke" | "heart" | "firefly" | "dust" | "bit";
+  kind: "leaf" | "spark" | "smoke" | "heart" | "firefly" | "dust" | "bit" | "ripple" | "star";
   phase: number;
 }
 
@@ -109,6 +118,15 @@ export class Game {
   private prompt: string | null = null;
   private nearNpc: Npc | null = null;
   private applesEaten = 0;
+  private mode: "walk" | "fishing" | "releasing" = "walk";
+  private fishing: { puddle: Puddle; phase: "wait" | "bite"; t: number; waitFor: number; bobX: number } | null = null;
+  private releasing: { fish: FishSpecies; t: number } | null = null;
+  private catchAnim: { fish: FishSpecies; t: number; x0: number; y0: number } | null = null;
+  private inventory: Inventory = {};
+  private toast: { text: string; t: number } | null = null;
+  private fishCaught = 0;
+  private fishReleased = 0;
+  private nearPuddle: Puddle | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -148,6 +166,14 @@ export class Game {
     this.banner = null;
     this.dead = false;
     this.applesEaten = 0;
+    this.mode = "walk";
+    this.fishing = null;
+    this.releasing = null;
+    this.catchAnim = null;
+    this.inventory = {};
+    this.toast = null;
+    this.fishCaught = 0;
+    this.fishReleased = 0;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
     this.emitHud();
@@ -220,7 +246,8 @@ export class Game {
     const active = this.running && !this.dead;
 
     if (active) {
-      const dir = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
+      const locked = this.mode !== "walk";
+      const dir = locked ? 0 : (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
       const over = Math.abs(p.vx) > MAX_SPEED;
       if (dir) {
         p.vx += dir * ACCEL * dt;
@@ -235,8 +262,8 @@ export class Game {
       } else {
         p.vx = clamp(p.vx, -MAX_SPEED, MAX_SPEED);
       }
-      if (this.pressed.has("jump")) p.jumpBuf = 0.12;
-      if (this.pressed.has("down") && p.plat) {
+      if (!locked && this.pressed.has("jump")) p.jumpBuf = 0.12;
+      if (!locked && this.pressed.has("down") && p.plat) {
         p.dropT = 0.25;
         p.plat = null;
         p.onGround = false;
@@ -333,8 +360,18 @@ export class Game {
     this.updateNpcs(dt);
     this.updateBeetles(dt, active);
     this.updateApples(dt);
-    if (active) this.updateInteract();
-    else this.prompt = null;
+    if (active && this.mode === "fishing") this.updateFishing(dt);
+    if (active && this.mode === "releasing") this.updateRelease(dt);
+    if (active && this.mode === "walk") this.updateInteract();
+    else if (!active) this.prompt = null;
+    if (this.catchAnim) {
+      this.catchAnim.t += dt;
+      if (this.catchAnim.t > 0.6) this.catchAnim = null;
+    }
+    if (this.toast) {
+      this.toast.t -= dt;
+      if (this.toast.t <= 0) this.toast = null;
+    }
     this.updateParticles(dt);
 
     // camera
@@ -413,7 +450,7 @@ export class Game {
       if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
       b.y = this.groundAt(b.x);
       b.walkT += dt;
-      if (!active) continue;
+      if (!active || this.mode === "releasing") continue;
       if (Math.abs(b.x - p.x) < 8 && p.y > b.y - 8 && p.y - 15 < b.y) {
         if (p.vy > 20 && p.y < b.y - 2) {
           b.alive = false;
@@ -426,6 +463,7 @@ export class Game {
           }
         } else if (p.invuln <= 0) {
           this.vitals = takeDamage(this.vitals, BEETLE_DAMAGE);
+          if (this.mode === "fishing") this.endFishing("Ouch! You dropped your rod.");
           p.invuln = 1.2;
           p.vx = (Math.sign(p.x - b.x) || 1) * 150;
           p.vy = -140;
@@ -469,11 +507,18 @@ export class Game {
       (t) => Math.abs(t.x - p.x) < 16 && Math.abs(this.groundAt(t.x) - p.y) < 30 && t.apples.some((a) => a.grown),
     );
 
+    const puddle =
+      p.onGround && !p.plat
+        ? this.world.puddles.find((pd) => Math.abs(p.x - pd.x) < pd.half + 12) ?? null
+        : null;
+    this.nearPuddle = puddle;
+
     if (this.talking && Math.abs(this.talking.npc.x - p.x) > 40) this.talking = null;
 
     if (this.talking) this.prompt = "E · next";
     else if (nearNpc) this.prompt = `E · talk to ${nearNpc.name}`;
     else if (tree) this.prompt = `E · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
+    else if (puddle) this.prompt = "E · fish in the puddle";
     else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
     else this.prompt = null;
 
@@ -501,8 +546,137 @@ export class Game {
         for (let i = 0; i < 3; i++) {
           this.spawn({ x: p.x + (i - 1) * 4, y: p.y - 20, vx: 0, vy: -18, life: 0.9, color: "#ff5a6a", size: 1, grav: 0, kind: "heart" });
         }
+      } else if (puddle) {
+        this.startFishing(puddle);
       }
       this.emitHud();
+    }
+  }
+
+  // ---------- fishing ----------
+  private startFishing(pd: Puddle) {
+    const p = this.p;
+    if (Math.abs(p.x - pd.x) > pd.half - 2) p.facing = pd.x >= p.x ? 1 : -1;
+    const bobX = clamp(p.x + p.facing * 16, pd.x - pd.half + 3, pd.x + pd.half - 3);
+    p.vx = 0;
+    this.mode = "fishing";
+    this.talking = null;
+    this.fishing = { puddle: pd, phase: "wait", t: 0, waitFor: rollWait(Math.random()), bobX };
+    this.ripple(bobX, this.groundAt(pd.x));
+    sfx.cast();
+  }
+
+  private endFishing(msg: string | null) {
+    this.mode = "walk";
+    this.fishing = null;
+    if (msg) this.showToast(msg);
+  }
+
+  private showToast(text: string) {
+    this.toast = { text, t: 2.6 };
+    this.emitHud();
+  }
+
+  private ripple(x: number, y: number) {
+    this.spawn({ x, y, vx: 0, vy: 0, life: 0.9, color: "#cfe9f0", size: 1, grav: 0, kind: "ripple" });
+  }
+
+  private updateFishing(dt: number) {
+    const f = this.fishing;
+    if (!f) return;
+    f.t += dt;
+    const wy = this.groundAt(f.puddle.x);
+    if (this.keys.left || this.keys.right || this.pressed.has("act")) {
+      this.pressed.delete("act");
+      this.endFishing("You reeled in your line.");
+      return;
+    }
+    const res = resolveBite(f.phase, f.t, this.pressed.has("jump"));
+    if (f.phase === "wait") {
+      this.prompt = "Waiting for a bite…";
+      if (res === "early") {
+        sfx.splash();
+        this.ripple(f.bobX, wy);
+        this.endFishing("Too early! The fish swam away.");
+        return;
+      }
+      if (Math.random() < dt * 0.8) this.ripple(f.bobX + (Math.random() - 0.5) * 6, wy);
+      if (f.t >= f.waitFor) {
+        f.phase = "bite";
+        f.t = 0;
+        sfx.bite();
+        this.ripple(f.bobX, wy);
+        this.ripple(f.bobX, wy);
+        this.emitHud();
+      }
+      return;
+    }
+    this.prompt = "SPACE!";
+    if (res === "caught") {
+      const fish = rollFish(Math.random());
+      this.inventory = addFish(this.inventory, fish.id);
+      this.fishCaught++;
+      sfx.caught();
+      for (let i = 0; i < 10; i++) {
+        this.spawn({ x: f.bobX, y: wy, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
+      }
+      this.catchAnim = { fish, t: 0, x0: f.bobX, y0: wy };
+      this.endFishing(`You caught a ${fish.name}!`);
+    } else if (res === "missed") {
+      sfx.splash();
+      this.endFishing("It got away…");
+    }
+  }
+
+  /** Called from the inventory: hold the fish up and let the light carry it away. */
+  releaseFish(id: string) {
+    const fish = fishById(id);
+    if (!fish || !this.running || this.dead || (this.inventory[id] ?? 0) <= 0) return false;
+    if (this.mode === "releasing") return false;
+    if (this.mode === "fishing") this.endFishing(null);
+    this.inventory = removeFish(this.inventory, id);
+    this.mode = "releasing";
+    this.talking = null;
+    this.p.vx = 0;
+    this.releasing = { fish, t: 0 };
+    sfx.release();
+    this.emitHud();
+    return true;
+  }
+
+  private releaseFishPos() {
+    const r = this.releasing;
+    if (!r) return null;
+    const p = this.p;
+    const t = r.t;
+    const hold = { x: p.x, y: p.y - 21 };
+    if (t < 1.2) return { ...hold, y: hold.y + (t < 0.3 ? Math.round((0.3 - t) * 30) : 0), a: 1 };
+    const k = t - 1.2;
+    return {
+      x: hold.x + Math.sin(k * 5) * 3,
+      y: hold.y - k * 14 - k * k * 32,
+      a: t > RELEASE_TIME - 0.6 ? Math.max(0, (RELEASE_TIME - t) / 0.6) : 1,
+    };
+  }
+
+  private updateRelease(dt: number) {
+    const r = this.releasing;
+    if (!r) return;
+    r.t += dt;
+    this.prompt = null;
+    const p = this.p;
+    if (r.t > 0.4 && Math.random() < dt * 22) {
+      this.spawn({ x: p.x + (Math.random() - 0.5) * 16, y: p.y - Math.random() * 12, vx: (Math.random() - 0.5) * 4, vy: -30 - Math.random() * 40, life: 1.6, color: Math.random() < 0.5 ? "#fff3a0" : "#ffd84a", size: 1, grav: -10, kind: "star" });
+    }
+    const fp = this.releaseFishPos();
+    if (fp && r.t > 1.2 && Math.random() < dt * 30) {
+      this.spawn({ x: fp.x + (Math.random() - 0.5) * 6, y: fp.y + 3, vx: (Math.random() - 0.5) * 8, vy: 10, life: 0.8, color: "#fff3a0", size: 1, grav: 0, kind: "star" });
+    }
+    if (r.t >= RELEASE_TIME) {
+      this.fishReleased++;
+      this.mode = "walk";
+      this.releasing = null;
+      this.showToast(`The ${r.fish.name} floated up into the light.`);
     }
   }
 
@@ -607,6 +781,12 @@ export class Game {
       resting: this.nearFire && this.vitals.health < 100,
       starving: this.vitals.hunger <= 0,
       applesEaten: this.applesEaten,
+      fishing: this.mode === "fishing" && this.fishing ? this.fishing.phase : null,
+      releasing: this.mode === "releasing",
+      toast: this.toast?.text ?? null,
+      inventory: FISH.filter((f) => (this.inventory[f.id] ?? 0) > 0).map((f) => ({ id: f.id, name: f.name, count: this.inventory[f.id] ?? 0 })),
+      fishCaught: this.fishCaught,
+      fishReleased: this.fishReleased,
     });
   }
 
@@ -644,6 +824,7 @@ export class Game {
     for (const t of this.world.trees) this.drawGiantTree(t, cx, cy);
     for (const pl of this.world.platforms) this.drawPlatform(pl, cx, cy);
     this.drawGround(cx, cy);
+    for (const pd of this.world.puddles) this.drawPuddle(pd, cx, cy);
     for (const v of this.world.villages) this.drawVillage(v, cx, cy, night);
     for (const t of this.world.appleTrees) {
       const sx = t.x - cx;
@@ -693,9 +874,11 @@ export class Game {
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,
+        armsUp: this.mode === "releasing" && (this.releasing?.t ?? 0) > 0.15,
       });
       ctx.globalAlpha = 1;
     }
+    this.drawFishingGear(cx, cy);
 
     this.drawParticles(cx, cy, false);
     this.drawFgGrass(cx, cy);
@@ -1064,17 +1247,139 @@ export class Game {
     rect(ctx, "#1b140f", x + 2, y - 1 + bob, 1, 1);
   }
 
+  private drawPuddle(pd: Puddle, cx: number, cy: number) {
+    const ctx = this.ctx;
+    const sx = Math.round(pd.x - cx);
+    if (sx + pd.half < -4 || sx - pd.half > this.W + 4) return;
+    const gy = this.groundAt(pd.x) - cy;
+    const tick = Math.floor(this.time * 2);
+    for (let dx = -pd.half - 2; dx <= pd.half + 2; dx++) {
+      const x = sx + dx;
+      if (Math.abs(dx) > pd.half) {
+        rect(ctx, "#4a3626", x, gy, 1, 2);
+        rect(ctx, "#3d6e2e", x, gy - 1, 1, 1);
+        continue;
+      }
+      const k = dx / pd.half;
+      const depth = Math.max(1, Math.round(3.4 * Math.sqrt(1 - k * k)));
+      rect(ctx, "#2a1f17", x, gy, 1, depth + 2);
+      rect(ctx, "#2f5a70", x, gy, 1, depth + 1);
+      rect(ctx, "#4f86a0", x, gy, 1, 1);
+      if (hash1(pd.x + dx * 13, tick) < 0.1) rect(ctx, "#cfe9f0", x, gy, 1, 1);
+    }
+    // little reeds at the edges
+    rect(ctx, "#4f8c36", sx - pd.half - 3, gy - 6, 1, 6);
+    rect(ctx, "#6b4a30", sx - pd.half - 3, gy - 8, 1, 2);
+    rect(ctx, "#4f8c36", sx + pd.half + 3, gy - 5, 1, 5);
+    rect(ctx, "#4f8c36", sx + pd.half + 4, gy - 3, 1, 3);
+    // lily pad
+    rect(ctx, "#5fa04a", sx + Math.round(pd.half * 0.4), gy, 3, 1);
+  }
+
+  private drawFishingGear(cx: number, cy: number) {
+    const ctx = this.ctx;
+    const p = this.p;
+    const px = Math.round(p.x - cx);
+    const py = Math.round(p.y - cy);
+    const f = p.facing >= 0 ? 1 : -1;
+    const fish = this.fishing;
+    if (this.mode === "fishing" && fish) {
+      const hx = px + f * 5;
+      const hy = py - 6;
+      const tx = px + f * 14;
+      const ty = py - 18;
+      drawLine(ctx, hx, hy, tx, ty, "#2a1d14");
+      drawLine(ctx, hx, hy - 1, tx - f, ty, "#8a6342");
+      const wy = this.groundAt(fish.puddle.x) - cy;
+      const bx = Math.round(fish.bobX - cx);
+      const dip = fish.phase === "bite" ? (Math.floor(this.time * 16) % 2) + 1 : Math.round(Math.sin(this.time * 3)) > 0 ? 0 : 1;
+      drawLine(ctx, tx, ty, bx, wy - 2 + dip, "#d9d2c0");
+      rect(ctx, "#1b140f", bx - 1, wy - 3 + dip, 3, 3);
+      rect(ctx, "#e0362c", bx, wy - 3 + dip, 1, 1);
+      rect(ctx, "#f8f2e4", bx, wy - 2 + dip, 1, 1);
+      if (fish.phase === "bite") {
+        const bob = Math.floor(this.time * 10) % 2;
+        const ex = px - 1;
+        const ey = py - 31 - bob;
+        rect(ctx, "#1b140f", ex - 1, ey - 1, 4, 8);
+        rect(ctx, "#1b140f", ex - 1, ey + 8, 4, 4);
+        rect(ctx, "#ffd84a", ex, ey, 2, 6);
+        rect(ctx, "#fff3a0", ex, ey, 1, 3);
+        rect(ctx, "#ffd84a", ex, ey + 9, 2, 2);
+      }
+    }
+    const c = this.catchAnim;
+    if (c) {
+      const k = Math.min(1, c.t / 0.6);
+      const x = c.x0 + (p.x - c.x0) * k - cx;
+      const y = c.y0 + (p.y - 20 - c.y0) * k - Math.sin(k * Math.PI) * 22 - cy;
+      drawFish(ctx, x, y, c.fish, c.x0 < p.x ? -1 : 1);
+    }
+  }
+
+  private drawReleaseLight(
+    cx: number,
+    cy: number,
+    glow: (x: number, y: number, r: number, rgb: string, a: number) => void,
+  ) {
+    const r = this.releasing;
+    if (!r) return;
+    const ctx = this.ctx;
+    const t = r.t;
+    const inA = clamp((t - 0.25) / 0.6, 0, 1);
+    const outA = t > RELEASE_TIME - 0.7 ? clamp((RELEASE_TIME - t) / 0.7, 0, 1) : 1;
+    const a = inA * outA * (0.9 + Math.sin(this.time * 9) * 0.1);
+    if (a <= 0) return;
+    const px = Math.round(this.p.x - cx);
+    const py = Math.round(this.p.y - cy);
+    ctx.globalCompositeOperation = "lighter";
+    for (const [w, al] of [[30, 0.16], [18, 0.24], [8, 0.34]] as const) {
+      const g = ctx.createLinearGradient(px - w / 2, 0, px + w / 2, 0);
+      g.addColorStop(0, "rgba(255,215,80,0)");
+      g.addColorStop(0.5, `rgba(255,225,110,${(al * a).toFixed(3)})`);
+      g.addColorStop(1, "rgba(255,215,80,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(px - w / 2, 0, w, py + 2);
+    }
+    glow(px, py - 8, 34, "255,210,90", 0.22 * a);
+    glow(px, py + 2, 18, "255,230,140", 0.15 * a);
+    const fp = this.releaseFishPos();
+    if (fp) glow(fp.x - cx, fp.y - cy, 16, "255,240,170", 0.7 * a * fp.a);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  private drawReleaseFish(cx: number, cy: number) {
+    const r = this.releasing;
+    const fp = this.releaseFishPos();
+    if (!r || !fp || fp.a <= 0) return;
+    this.ctx.globalAlpha = fp.a;
+    const flip = r.t > 1.2 && Math.floor(r.t * 4) % 2 === 0 ? -1 : 1;
+    drawFish(this.ctx, fp.x - cx, fp.y - cy, r.fish, flip);
+    this.ctx.globalAlpha = 1;
+  }
+
   private drawParticles(cx: number, cy: number, glowOnly: boolean) {
     const ctx = this.ctx;
     for (const q of this.particles) {
-      if ((q.kind === "firefly") !== glowOnly) continue;
+      if ((q.kind === "firefly" || q.kind === "star") !== glowOnly) continue;
       const sx = Math.round(q.x - cx);
       const sy = Math.round(q.y - cy);
       if (sx < -4 || sx > this.W + 4) continue;
       const a = Math.min(1, q.life / Math.min(0.6, q.max));
       ctx.globalAlpha = q.kind === "smoke" ? a * 0.35 : a;
       ctx.fillStyle = q.color;
-      if (q.kind === "heart") {
+      if (q.kind === "ripple") {
+        const sp = Math.round((1 - q.life / q.max) * 7);
+        ctx.fillRect(sx - sp - 1, sy, 2, 1);
+        ctx.fillRect(sx + sp, sy, 2, 1);
+      } else if (q.kind === "star") {
+        ctx.fillRect(sx, sy, 1, 1);
+        if (q.life > q.max * 0.5) {
+          ctx.globalAlpha = a * 0.5;
+          ctx.fillRect(sx - 1, sy, 3, 1);
+          ctx.fillRect(sx, sy - 1, 1, 3);
+        }
+      } else if (q.kind === "heart") {
         ctx.fillRect(sx - 1, sy, 1, 1);
         ctx.fillRect(sx + 1, sy, 1, 1);
         ctx.fillRect(sx - 1, sy + 1, 3, 1);
@@ -1166,7 +1471,9 @@ export class Game {
       glow(q.x - cx, q.y - cy, 5, "200,255,120", a * 0.5);
       ctx.globalCompositeOperation = "source-over";
     }
+    this.drawReleaseLight(cx, cy, glow);
     this.drawParticles(cx, cy, true);
+    this.drawReleaseFish(cx, cy);
     if (this.dead) {
       ctx.fillStyle = "rgba(20,8,8,0.35)";
       ctx.fillRect(0, 0, this.W, this.H);

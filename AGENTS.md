@@ -33,4 +33,5 @@ use the editor.
 
 - The game runs in a plain canvas engine under `src/game/` (world gen, engine loop, sprites, sfx); React (`src/components/game/`) only renders the HUD/overlays from a throttled `onHud` callback — keeps 60fps rendering out of React.
 - Health/hunger rules live as pure functions in `src/game/vitals.ts` with tests in `vitals.test.ts` — change numbers there, not inside the engine.
+- Fishing rules, fish species, inventory helpers and the shared fish pixel grid live in `src/game/fishing.ts` (tested in `fishing.test.ts`); the engine owns the inventory and exposes `releaseFish(id)` for the React fish bag — one source of truth for both canvas and HUD.
 - All game art is drawn procedurally with integer `fillRect`s on a low-res canvas (225px tall) scaled with `image-rendering: pixelated` — keeps a consistent pixel look without sprite assets.
