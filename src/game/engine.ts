@@ -649,7 +649,7 @@ export class Game {
     if (!r) return null;
     const p = this.p;
     const t = r.t;
-    const hold = { x: p.x, y: p.y - 23 };
+    const hold = { x: p.x, y: p.y - 21 };
     if (t < 1.2) return { ...hold, y: hold.y + (t < 0.3 ? Math.round((0.3 - t) * 30) : 0), a: 1 };
     const k = t - 1.2;
     return {
