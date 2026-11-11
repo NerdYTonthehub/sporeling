@@ -52,3 +52,14 @@ export function takeDamage(v: Vitals, amount: number): Vitals {
 }
 
 export const isDead = (v: Vitals) => v.health <= 0;
+
+/** Glowing dungeon mushrooms you can snack on. */
+export const GLOWCAP_HEALTH = 30;
+export const GLOWCAP_HUNGER = 15;
+
+export function eatGlowcap(v: Vitals): Vitals {
+  return {
+    health: clamp(v.health + GLOWCAP_HEALTH, 0, MAX_HEALTH),
+    hunger: clamp(v.hunger + GLOWCAP_HUNGER, 0, MAX_HUNGER),
+  };
+}
