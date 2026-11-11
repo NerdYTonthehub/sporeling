@@ -44,7 +44,7 @@ export interface Flyer {
   flap: number;
   alive: boolean;
   respawn: number;
-  section?: number;
+  section?: number | undefined;
 }
 
 /** How close (horizontally) the player must be before a flying beetle swoops. */
