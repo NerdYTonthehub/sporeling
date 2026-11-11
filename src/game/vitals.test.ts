@@ -37,3 +37,11 @@ describe("nap", () => {
     expect(nap({ health: 20, hunger: 5 })).toEqual({ health: 100, hunger: 0 });
   });
 });
+
+describe("glowcaps", () => {
+  it("a dungeon glowcap heals 30 and fills 15 hunger", async () => {
+    const { eatGlowcap } = await import("./vitals");
+    expect(eatGlowcap({ health: 40, hunger: 50 })).toEqual({ health: 70, hunger: 65 });
+    expect(eatGlowcap({ health: 90, hunger: 95 })).toEqual({ health: 100, hunger: 100 });
+  });
+});
