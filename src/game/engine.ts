@@ -911,7 +911,7 @@ export class Game {
           n.vx = -Math.abs(n.vx);
           n.facing = -1;
         }
-        n.y = this.groundAt(n.x);
+        n.y = v.floorY ?? this.groundAt(n.x);
         if (n.vx) n.walkT += dt * 0.5;
       }
     }
@@ -919,40 +919,44 @@ export class Game {
 
   private updateBeetles(dt: number, active: boolean) {
     const p = this.p;
-    for (const b of this.world.beetles) {
+    const canFight = active && this.mode !== "releasing" && !this.fade;
+    for (const b of this.lvl.beetles) {
       if (!b.alive) {
         b.respawn -= dt;
         if (b.respawn <= 0 && Math.abs(b.x - p.x) > this.W) b.alive = true;
         continue;
       }
       if (Math.abs(b.x - p.x) > this.W * 2) continue;
+      if (b.big) {
+        b.hitT = (b.hitT ?? 0) - dt;
+        if (this.scene === "dungeon" && p.x > BOSS_ARENA_X && canFight) {
+          const before = b.chargeT ?? 2;
+          b.chargeT = before - dt;
+          if (before > 0 && b.chargeT <= 0) {
+            b.vx = (Math.sign(p.x - b.x) || 1) * 95;
+            sfx.bossHit();
+          }
+          if (b.chargeT <= -1.1) {
+            b.chargeT = 1.4 + Math.random() * 1.2;
+            b.vx = Math.sign(b.vx || 1) * 30;
+          }
+        }
+      }
       b.x += b.vx * dt;
       if (b.x < b.minX) b.vx = Math.abs(b.vx);
       if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
       b.y = this.groundAt(b.x);
-      b.walkT += dt;
-      if (!active || this.mode === "releasing") continue;
-      if (Math.abs(b.x - p.x) < 8 && p.y > b.y - 8 && p.y - 15 < b.y) {
-        if (p.vy > 20 && p.y < b.y - 2) {
-          b.alive = false;
-          b.respawn = 30;
-          p.vy = -180;
+      b.walkT += dt * (b.big ? 0.7 : 1);
+      if (!canFight) continue;
+      const hw = b.big ? 14 : 8;
+      const top = b.big ? 16 : 8;
+      if (Math.abs(b.x - p.x) < hw && p.y > b.y - top && p.y - 15 < b.y) {
+        if (p.vy > 20 && p.y < b.y - top + 6) {
+          this.hitBeetle(b);
+          p.vy = b.big ? -230 : -180;
           p.onGround = false;
-          sfx.stomp();
-          for (let i = 0; i < 8; i++) {
-            this.spawn({ x: b.x, y: b.y - 4, vx: (Math.random() - 0.5) * 80, vy: -40 - Math.random() * 60, life: 0.8, color: i % 2 ? "#1f2e2b" : "#4d8a7c", size: 1, grav: 300, kind: "bit" });
-          }
         } else if (p.invuln <= 0) {
-          this.vitals = takeDamage(this.vitals, BEETLE_DAMAGE);
-          if (this.mode === "fishing") this.endFishing("Ouch! You dropped your rod.");
-          p.invuln = 1.2;
-          p.vx = (Math.sign(p.x - b.x) || 1) * 150;
-          p.vy = -140;
-          p.onGround = false;
-          p.plat = null;
-          this.shakeT = 0.25;
-          sfx.hurt();
-          if (isDead(this.vitals)) this.die();
+          this.hurt(b.big ? BOSS_DAMAGE : BEETLE_DAMAGE, b.x);
         }
       }
     }
@@ -970,7 +974,12 @@ export class Game {
   }
 
   private updateInteract() {
+    if (this.scene === "dungeon") {
+      this.updateDungeonInteract();
+      return;
+    }
     const p = this.p;
+    const A = this.labels.act;
     let nearNpc: Npc | null = null;
     let nd = 18;
     for (const v of this.world.villages) {
@@ -984,33 +993,46 @@ export class Game {
       }
     }
     this.nearNpc = nearNpc;
+    let house: { v: Village; h: House } | null = null;
+    if (p.onGround) {
+      for (const v of this.world.villages) {
+        if (Math.abs(p.x - v.x) > v.half + 20 || Math.abs(p.y - this.villageFloor(v)) > 3) continue;
+        for (const h of v.houses) if (Math.abs(p.x - h.x) < 6) house = { v, h };
+      }
+    }
+    const elder = this.world.elder;
+    const ex = elder.x + elder.w / 2;
+    const atElder = p.onGround && !p.plat && Math.abs(p.x - ex) < 14;
     const tree = this.world.appleTrees.find(
       (t) => Math.abs(t.x - p.x) < 16 && Math.abs(this.groundAt(t.x) - p.y) < 30 && t.apples.some((a) => a.grown),
     );
-
     const puddle =
       p.onGround && !p.plat
         ? this.world.puddles.find((pd) => Math.abs(p.x - pd.x) < pd.half + 12) ?? null
         : null;
     this.nearPuddle = puddle;
 
-    if (this.talking && Math.abs(this.talking.npc.x - p.x) > 40) this.talking = null;
+    if (this.talking?.npc && Math.abs(this.talking.npc.x - p.x) > 40) this.talking = null;
 
-    if (this.talking) this.prompt = "E · next";
-    else if (nearNpc) this.prompt = `E · talk to ${nearNpc.name}`;
-    else if (tree) this.prompt = `E · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
-    else if (puddle) this.prompt = "E · fish in the puddle";
+    if (this.talking) this.prompt = `${A} · next`;
+    else if (nearNpc) this.prompt = `${A} · talk to ${nearNpc.name}`;
+    else if (house) this.prompt = `${A} · go inside`;
+    else if (atElder) this.prompt = this.hasDoubleJump ? `${A} · enter the Elder Tree (cleared)` : `${A} · enter the Elder Tree`;
+    else if (tree) this.prompt = `${A} · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
+    else if (puddle) this.prompt = `${A} · fish in the puddle`;
     else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
     else this.prompt = null;
 
     if (this.pressed.has("act")) {
       if (this.talking) {
-        this.talking.idx++;
-        if (this.talking.idx >= this.talking.npc.lines.length) this.talking = null;
-        else sfx.talk();
+        this.advanceTalk();
       } else if (nearNpc) {
-        this.talking = { npc: nearNpc, idx: 0 };
+        this.talking = { npc: nearNpc, name: nearNpc.name, lines: nearNpc.lines, idx: 0 };
         sfx.talk();
+      } else if (house) {
+        this.enterHouse(house.v, house.h);
+      } else if (atElder) {
+        this.enterDungeon();
       } else if (tree) {
         const a = tree.apples.find((x) => x.grown)!;
         a.grown = false;
@@ -1072,7 +1094,7 @@ export class Game {
       this.endFishing("You reeled in your line.");
       return;
     }
-    const res = resolveBite(f.phase, f.t, this.pressed.has("jump"));
+    const res = resolveBite(f.phase, f.t, this.pressed.has("jump") || this.pressed.has("up"));
     if (f.phase === "wait") {
       this.prompt = "Waiting for a bite…";
       if (res === "early") {
@@ -1092,7 +1114,7 @@ export class Game {
       }
       return;
     }
-    this.prompt = "SPACE!";
+    this.prompt = `${this.labels.jump}!`;
     if (res === "caught") {
       const fish = rollFish(Math.random());
       this.inventory = addFish(this.inventory, fish.id);
@@ -1113,7 +1135,7 @@ export class Game {
   releaseFish(id: string) {
     const fish = fishById(id);
     if (!fish || !this.running || this.dead || (this.inventory[id] ?? 0) <= 0) return false;
-    if (this.mode === "releasing") return false;
+    if (this.mode === "releasing" || this.scene !== "forest" || this.fade) return false;
     if (this.mode === "fishing") this.endFishing(null);
     this.inventory = removeFish(this.inventory, id);
     this.mode = "releasing";
@@ -1157,7 +1179,14 @@ export class Game {
       this.fishReleased++;
       this.mode = "walk";
       this.releasing = null;
-      this.showToast(`The ${r.fish.name} floated up into the light.`);
+      const reward = releaseReward(r.fish.id);
+      this.coins += reward;
+      this.coinPop = { amount: reward, id: ++this.coinPopId, t: 2.2 };
+      sfx.coin();
+      for (let i = 0; i < 8; i++) {
+        this.spawn({ x: p.x + (Math.random() - 0.5) * 8, y: p.y - 26, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, life: 0.8, color: i % 2 ? "#ffd84a" : "#fff3a0", size: 1, grav: 180, kind: "spark" });
+      }
+      this.showToast(`The ${r.fish.name} floated up into the light. +${reward} coins!`);
     }
   }
 
@@ -1174,8 +1203,9 @@ export class Game {
 
   private updateParticles(dt: number) {
     const night = this.darkness();
+    const forest = this.scene === "forest";
     // falling leaves from the canopy
-    if (Math.random() < dt * 2.2) {
+    if (forest && Math.random() < dt * 2.2) {
       this.spawn({
         x: this.camX + Math.random() * (this.W + 60) - 30,
         y: this.camY - 5,
@@ -1189,7 +1219,7 @@ export class Game {
       });
     }
     // fireflies at night
-    if (night > 0.3 && Math.random() < dt * 3 * night) {
+    if (forest && night > 0.3 && Math.random() < dt * 3 * night) {
       this.spawn({
         x: this.camX + Math.random() * this.W,
         y: this.camY + this.H * (0.35 + Math.random() * 0.5),
@@ -1203,9 +1233,9 @@ export class Game {
       });
     }
     // campfire sparks + smoke
-    for (const v of this.world.villages) {
+    for (const v of forest ? this.world.villages : []) {
       if (Math.abs(v.fireX - this.camX - this.W / 2) > this.W) continue;
-      const gy = this.groundAt(v.fireX);
+      const gy = this.villageFloor(v);
       if (Math.random() < dt * 6) {
         this.spawn({ x: v.fireX + (Math.random() - 0.5) * 4, y: gy - 5, vx: (Math.random() - 0.5) * 8, vy: -20 - Math.random() * 15, life: 1 + Math.random(), color: "#ffb347", size: 1, grav: -5, kind: "spark" });
       }
@@ -1245,16 +1275,17 @@ export class Game {
     let compass: HudState["compass"] = null;
     if (undiscovered.length) {
       const v = undiscovered.reduce((a, b) => (Math.abs(a.x - p.x) < Math.abs(b.x - p.x) ? a : b));
-      compass = { name: v.name, dir: v.x >= p.x ? 1 : -1, steps: Math.round(Math.abs(v.x - p.x) / 8) };
+      compass = { name: v.name, dir: v.x >= p.x ? 1 : -1, steps: Math.round(Math.abs(v.x - p.x) / 8), high: v.floorY !== undefined };
     }
     const tk = this.talking;
+    const boss = this.scene === "dungeon" && this.dungeon ? this.dungeon.beetles.find((b) => b.big && b.alive) : undefined;
     this.onHud({
       health: this.vitals.health,
       hunger: this.vitals.hunger,
       found: villages.length - undiscovered.length,
       total: villages.length,
       prompt: this.dead || !this.running ? null : this.prompt,
-      dialog: tk ? { name: tk.npc.name, text: tk.npc.lines[tk.idx] ?? "", page: tk.idx + 1, pages: tk.npc.lines.length } : null,
+      dialog: tk ? { name: tk.name, text: tk.lines[tk.idx] ?? "", page: tk.idx + 1, pages: tk.lines.length } : null,
       banner: this.banner ? { title: this.banner.title, sub: this.banner.sub } : null,
       dead: this.dead,
       timeOfDay: this.timeLabel(),
@@ -1268,6 +1299,11 @@ export class Game {
       inventory: FISH.filter((f) => (this.inventory[f.id] ?? 0) > 0).map((f) => ({ id: f.id, name: f.name, count: this.inventory[f.id] ?? 0 })),
       fishCaught: this.fishCaught,
       fishReleased: this.fishReleased,
+      coins: this.coins,
+      coinPop: this.coinPop ? { amount: this.coinPop.amount, id: this.coinPop.id } : null,
+      scene: this.scene,
+      doubleJump: this.hasDoubleJump,
+      boss: boss && p.x > BOSS_ARENA_X ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
     });
   }
 
