@@ -326,12 +326,69 @@ export class Game {
 
   // ---------- update ----------
   private update(dt: number) {
+    if (this.paused) {
+      this.pressed.clear();
+      return;
+    }
     this.time += dt;
+    if (this.fade) {
+      const f = this.fade;
+      f.t += dt;
+      if (f.action && f.t >= FADE / 2) {
+        const a = f.action;
+        f.action = null;
+        a();
+      }
+      if (f.t >= FADE) this.fade = null;
+    }
+    if (this.scene === "room") this.updateRoom(dt);
+    else this.updateSide(dt);
+    if (this.toast) {
+      this.toast.t -= dt;
+      if (this.toast.t <= 0) this.toast = null;
+    }
+    if (this.coinPop) {
+      this.coinPop.t -= dt;
+      if (this.coinPop.t <= 0) this.coinPop = null;
+    }
+    this.pressed.clear();
+    this.hudT -= dt;
+    if (this.hudT <= 0) {
+      this.hudT = 0.1;
+      this.emitHud();
+    }
+  }
+
+  /** Fade to black, run `action` while the screen is dark, fade back in. */
+  private transition(action: () => void) {
+    if (this.fade) return;
+    this.clearKeys();
+    this.fade = { t: 0, action };
+  }
+
+  private snapCamera() {
+    const p = this.p;
+    this.camX = clamp(p.x - this.W / 2, 0, Math.max(0, this.lvl.w - this.W));
+    this.camY =
+      this.scene === "dungeon" ? DUNGEON_FLOOR + 38 - this.H : Math.min(p.y - this.H * 0.64, this.groundAt(p.x) + 38 - this.H);
+  }
+
+  private maxX() {
+    if (this.scene === "dungeon" && this.dungeon) {
+      const g = this.dungeon.gates.find((gt) => gt.openT < 0.6);
+      if (g) return g.x - 9;
+    }
+    return this.lvl.w - 12;
+  }
+
+  private updateSide(dt: number) {
     const p = this.p;
     const active = this.running && !this.dead;
+    const locked = this.mode !== "walk" || !!this.fade;
+    const jumpPressed = this.pressed.has("jump") || this.pressed.has("up");
+    const prevX = p.x;
 
     if (active) {
-      const locked = this.mode !== "walk";
       const dir = locked ? 0 : (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
       const over = Math.abs(p.vx) > MAX_SPEED;
       if (dir) {
@@ -347,7 +404,7 @@ export class Game {
       } else {
         p.vx = clamp(p.vx, -MAX_SPEED, MAX_SPEED);
       }
-      if (!locked && this.pressed.has("jump")) p.jumpBuf = 0.12;
+      if (!locked && jumpPressed) p.jumpBuf = 0.12;
       if (!locked && this.pressed.has("down") && p.plat) {
         p.dropT = 0.25;
         p.plat = null;
@@ -359,10 +416,21 @@ export class Game {
         p.plat = null;
         p.coyote = 0;
         p.jumpBuf = 0;
+        this.airJumps = jumpsAllowed(this.hasDoubleJump) - 1;
         sfx.jump();
         this.dust(p.x, p.y, 4);
+      } else if (!locked && jumpPressed && !p.onGround && this.airJumps > 0) {
+        // Winged Spore double jump
+        this.airJumps--;
+        p.vy = -JUMP_V * 0.95;
+        p.jumpBuf = 0;
+        sfx.djump();
+        for (let i = 0; i < 10; i++) {
+          this.spawn({ x: p.x + (Math.random() - 0.5) * 10, y: p.y - 2, vx: (Math.random() - 0.5) * 50, vy: 15 + Math.random() * 30, life: 0.5, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
+        }
       }
-      if (!this.keys.jump && p.vy < -90) p.vy = -90;
+      if (!this.keys.jump && !this.keys.up && p.vy < -90) p.vy = -90;
+      if (!locked && this.pressed.has("attack") && this.attackCd <= 0) this.startAttack();
     } else {
       p.vx *= 0.9;
     }
@@ -372,12 +440,18 @@ export class Game {
     p.dropT -= dt;
     p.invuln -= dt;
     p.blinkT -= dt;
+    this.attackT -= dt;
+    this.attackCd -= dt;
     if (p.blinkT < -0.12) p.blinkT = 2 + Math.random() * 3;
 
     p.vy = Math.min(400, p.vy + GRAVITY * dt);
     const prevY = p.y;
-    p.x = clamp(p.x + p.vx * dt, 12, WORLD_W - 12);
+    p.x = clamp(p.x + p.vx * dt, 12, this.maxX());
     p.y += p.vy * dt;
+    if (this.scene === "dungeon" && p.y - 22 < DUNGEON_CEIL) {
+      p.y = DUNGEON_CEIL + 22;
+      if (p.vy < 0) p.vy = 0;
+    }
 
     let landed = false;
     const g = this.groundAt(p.x);
@@ -389,11 +463,21 @@ export class Game {
       p.y = g;
       landed = true;
     }
+    // stay glued to the platform you stand on (bridges sag and slope)
+    const cur = p.plat;
+    if (!landed && cur && p.vy >= 0 && p.dropT <= 0 && p.x + 3 >= cur.x && p.x - 3 <= cur.x + cur.w) {
+      const sy = surfaceY(cur, p.x);
+      if (Math.abs(p.y - sy) < 4) {
+        p.y = sy;
+        landed = true;
+      }
+    }
     if (!landed && p.vy >= 0 && p.dropT <= 0) {
-      for (const pl of this.world.platforms) {
+      for (const pl of this.lvl.platforms) {
         if (p.x + 3 < pl.x || p.x - 3 > pl.x + pl.w) continue;
-        if (prevY <= pl.y + 0.01 && p.y >= pl.y) {
-          p.y = pl.y;
+        const sy = surfaceY(pl, p.x);
+        if (prevY <= surfaceY(pl, prevX) + 0.01 && p.y >= sy) {
+          p.y = sy;
           landed = true;
           p.plat = pl;
           break;
@@ -405,6 +489,7 @@ export class Game {
       p.vy = 0;
       p.onGround = true;
       p.coyote = 0.1;
+      this.airJumps = jumpsAllowed(this.hasDoubleJump) - 1;
     } else {
       p.onGround = false;
       p.plat = null;
@@ -412,9 +497,9 @@ export class Game {
     if (p.onGround && Math.abs(p.vx) > 4) p.walkT += dt * (Math.abs(p.vx) / MAX_SPEED);
 
     // vitals
-    this.nearFire = this.world.villages.some(
-      (v) => Math.abs(p.x - v.fireX) < 26 && Math.abs(p.y - this.groundAt(v.fireX)) < 6,
-    );
+    this.nearFire =
+      this.scene === "forest" &&
+      this.world.villages.some((v) => Math.abs(p.x - v.fireX) < 26 && Math.abs(p.y - this.villageFloor(v)) < 6);
     if (active) {
       this.vitals = tickVitals(this.vitals, dt, { nearFire: this.nearFire });
       if (this.nearFire && this.vitals.health < 100 && Math.random() < dt * 4) {
@@ -424,17 +509,19 @@ export class Game {
     }
 
     // village discovery
-    for (const v of this.world.villages) {
-      if (!v.discovered && Math.abs(p.x - v.x) < v.half && active) {
-        v.discovered = true;
-        const found = this.world.villages.filter((x) => x.discovered).length;
-        const total = this.world.villages.length;
-        this.banner = {
-          title: v.name,
-          sub: found === total ? "You found every mushroom village!" : `Village discovered · ${found}/${total}`,
-          t: 4,
-        };
-        sfx.discover();
+    if (this.scene === "forest") {
+      for (const v of this.world.villages) {
+        if (!v.discovered && Math.abs(p.x - v.x) < v.half && Math.abs(p.y - this.villageFloor(v)) < 40 && active) {
+          v.discovered = true;
+          const found = this.world.villages.filter((x) => x.discovered).length;
+          const total = this.world.villages.length;
+          this.banner = {
+            title: v.name,
+            sub: found === total ? "You found every mushroom village!" : `${v.floorY !== undefined ? "Treetop village" : "Village"} discovered · ${found}/${total}`,
+            t: 4,
+          };
+          sfx.discover();
+        }
       }
     }
     if (this.banner) {
@@ -442,36 +529,345 @@ export class Game {
       if (this.banner.t <= 0) this.banner = null;
     }
 
-    this.updateNpcs(dt);
+    if (this.scene === "forest") this.updateNpcs(dt);
     this.updateBeetles(dt, active);
+    this.updateFlyers(dt, active);
     this.updateApples(dt);
+    if (this.scene === "dungeon") this.updateDungeon(dt);
+    if (active && this.attackT > 0) this.resolveAttack();
     if (active && this.mode === "fishing") this.updateFishing(dt);
     if (active && this.mode === "releasing") this.updateRelease(dt);
-    if (active && this.mode === "walk") this.updateInteract();
-    else if (!active) this.prompt = null;
+    if (active && this.mode === "walk" && !this.fade) this.updateInteract();
+    else if (!active || this.fade) this.prompt = null;
     if (this.catchAnim) {
       this.catchAnim.t += dt;
       if (this.catchAnim.t > 0.6) this.catchAnim = null;
     }
-    if (this.toast) {
-      this.toast.t -= dt;
-      if (this.toast.t <= 0) this.toast = null;
-    }
     this.updateParticles(dt);
 
     // camera
-    const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, WORLD_W - this.W);
+    const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, Math.max(0, this.lvl.w - this.W));
     this.camX += (targetX - this.camX) * Math.min(1, dt * 4);
-    const maxY = this.groundAt(p.x) + 38 - this.H;
-    const targetY = Math.min(p.y - this.H * 0.64, maxY);
-    this.camY += (targetY - this.camY) * Math.min(1, dt * 3);
+    if (this.scene === "dungeon") {
+      this.camY = DUNGEON_FLOOR + 38 - this.H;
+    } else {
+      const maxY = this.groundAt(p.x) + 38 - this.H;
+      const targetY = Math.min(p.y - this.H * 0.64, maxY);
+      this.camY += (targetY - this.camY) * Math.min(1, dt * 3);
+    }
     this.shakeT -= dt;
+  }
 
-    this.pressed.clear();
-    this.hudT -= dt;
-    if (this.hudT <= 0) {
-      this.hudT = 0.1;
+  // ---------- house interiors (top-down) ----------
+  private enterHouse(v: Village, h: House) {
+    sfx.door();
+    this.transition(() => {
+      this.returnPos = { x: this.p.x, y: this.p.y };
+      this.room = createRoom(h, v.name, Math.round(h.x * 13 + v.x * 7));
+      this.scene = "room";
+      this.talking = null;
+      this.rp = { x: ROOM_SPAWN.x, y: ROOM_SPAWN.y - 4, facing: "up", walkT: 0, moving: false };
+    });
+  }
+
+  private exitRoom() {
+    sfx.door();
+    this.transition(() => {
+      this.scene = "forest";
+      this.room = null;
+      this.talking = null;
+      const p = this.p;
+      p.x = this.returnPos.x;
+      p.y = this.returnPos.y;
+      p.vx = 0;
+      p.vy = 0;
+      this.snapCamera();
+    });
+  }
+
+  private advanceTalk() {
+    const tk = this.talking;
+    if (!tk) return;
+    tk.idx++;
+    if (tk.idx >= tk.lines.length) this.talking = null;
+    else sfx.talk();
+  }
+
+  private updateRoom(dt: number) {
+    const room = this.room;
+    if (!room) return;
+    const rp = this.rp;
+    const active = this.running && !this.dead;
+    const furn = nearbyFurn(room, rp.x, rp.y);
+    this.nearFire = furn?.kind === "fireplace";
+    if (active) {
+      this.vitals = tickVitals(this.vitals, dt, { nearFire: this.nearFire });
+      if (isDead(this.vitals)) this.die();
+    }
+    const canMove = active && !this.fade && !this.talking;
+    let dx = 0;
+    let dy = 0;
+    if (canMove) {
+      dx = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
+      dy = (this.keys.down ? 1 : 0) - (this.keys.up ? 1 : 0);
+    }
+    rp.moving = dx !== 0 || dy !== 0;
+    if (rp.moving) {
+      const len = Math.hypot(dx, dy);
+      const n = moveInRoom(room, rp.x, rp.y, (dx / len) * ROOM_SPEED * dt, (dy / len) * ROOM_SPEED * dt);
+      rp.x = n.x;
+      rp.y = n.y;
+      rp.walkT += dt * 0.9;
+      rp.facing = dx ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+      if (rp.y >= FLOOR_BOTTOM + 7) {
+        this.exitRoom();
+        return;
+      }
+    }
+    const A = this.labels.act;
+    const door = atDoor(rp.x, rp.y);
+    if (!active || this.fade) this.prompt = null;
+    else if (this.talking) this.prompt = `${A} · next`;
+    else if (door) this.prompt = `${this.labels.down} · go outside`;
+    else if (furn?.kind === "bed") this.prompt = `${A} · take a nap`;
+    else if (furn?.kind === "bookshelf") this.prompt = `${A} · read a book`;
+    else if (furn?.kind === "fireplace") this.prompt = this.vitals.health < 100 ? "Warming up by the fire…" : "A crackling fireplace";
+    else this.prompt = null;
+
+    if (active && !this.fade && this.pressed.has("act")) {
+      if (this.talking) this.advanceTalk();
+      else if (door) this.exitRoom();
+      else if (furn?.kind === "bed") {
+        sfx.nap();
+        this.transition(() => {
+          this.vitals = nap(this.vitals);
+          this.showToast("Zzz… You wake up fully rested.");
+        });
+      } else if (furn?.kind === "bookshelf") {
+        this.talking = { npc: null, name: "Bookshelf", lines: [room.lore, "You put the book back carefully."], idx: 0 };
+        sfx.talk();
+      }
       this.emitHud();
+    }
+  }
+
+  // ---------- Elder Tree dungeon ----------
+  private enterDungeon() {
+    sfx.door();
+    this.transition(() => {
+      this.returnPos = { x: this.p.x, y: this.p.y };
+      if (!this.dungeon) this.dungeon = createDungeon();
+      const d = this.dungeon;
+      this.lvl = d;
+      this.scene = "dungeon";
+      this.talking = null;
+      const p = this.p;
+      p.x = d.entryX + 24;
+      p.y = this.groundAt(p.x);
+      p.vx = 0;
+      p.vy = 0;
+      p.plat = null;
+      p.facing = 1;
+      this.particles = [];
+      this.snapCamera();
+      if (!d.relicTaken) this.banner = { title: "The Elder Tree", sub: "Beat the beetles to open the root gates", t: 4 };
+    });
+  }
+
+  private exitDungeon() {
+    sfx.door();
+    this.transition(() => {
+      this.scene = "forest";
+      this.lvl = this.forestLvl;
+      this.talking = null;
+      const p = this.p;
+      p.x = this.returnPos.x;
+      p.y = this.groundAt(p.x);
+      p.vx = 0;
+      p.vy = 0;
+      p.plat = null;
+      p.facing = -1;
+      this.particles = [];
+      this.snapCamera();
+    });
+  }
+
+  private updateDungeon(dt: number) {
+    const d = this.dungeon;
+    if (!d) return;
+    const enemies = [...d.beetles, ...d.flyers];
+    for (const g of d.gates) {
+      if (!g.open && sectionCleared(enemies, g.section)) {
+        g.open = true;
+        this.shakeT = 0.4;
+        sfx.gate();
+        this.showToast(g.section === d.sections - 1 ? "The Beetle King is beaten! The last roots pull back…" : "The roots pull back. The way is open!");
+      }
+      if (g.open && g.openT < 1) g.openT = Math.min(1, g.openT + dt * 0.9);
+    }
+    if (Math.random() < dt * 3) {
+      this.spawn({ x: this.camX + Math.random() * this.W, y: DUNGEON_CEIL + 20 + Math.random() * 120, vx: (Math.random() - 0.5) * 4, vy: -2, life: 4 + Math.random() * 3, color: "#a8fff0", size: 1, grav: 0, kind: "firefly" });
+    }
+  }
+
+  private updateDungeonInteract() {
+    const d = this.dungeon;
+    if (!d) return;
+    const p = this.p;
+    const A = this.labels.act;
+    const onFloor = p.onGround && !p.plat;
+    const cap = onFloor ? d.glowcaps.find((gc) => !gc.eaten && Math.abs(gc.x - p.x) < 9) : undefined;
+    const shrine = onFloor && !d.relicTaken && Math.abs(p.x - d.shrineX) < 14;
+    const door = onFloor && (Math.abs(p.x - d.entryX) < 14 || Math.abs(p.x - d.exitX) < 14);
+    if (this.talking) this.prompt = `${A} · next`;
+    else if (shrine) this.prompt = `${A} · take the Winged Spore`;
+    else if (cap) this.prompt = `${A} · eat the glowcap`;
+    else if (door) this.prompt = `${A} · go outside`;
+    else this.prompt = null;
+    if (!this.pressed.has("act")) return;
+    if (this.talking) this.advanceTalk();
+    else if (shrine) this.takeRelic(d);
+    else if (cap) {
+      cap.eaten = true;
+      this.vitals = eatGlowcap(this.vitals);
+      sfx.eat();
+      for (let i = 0; i < 3; i++) {
+        this.spawn({ x: p.x + (i - 1) * 4, y: p.y - 20, vx: 0, vy: -18, life: 0.9, color: "#5fd6c4", size: 1, grav: 0, kind: "heart" });
+      }
+    } else if (door) this.exitDungeon();
+    this.emitHud();
+  }
+
+  private takeRelic(d: Dungeon) {
+    d.relicTaken = true;
+    this.hasDoubleJump = true;
+    this.airJumps = 1;
+    sfx.discover();
+    this.shakeT = 0.3;
+    for (let i = 0; i < 30; i++) {
+      const a = (i / 30) * Math.PI * 2;
+      this.spawn({ x: d.shrineX, y: DUNGEON_FLOOR - 24, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60, life: 1.2, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
+    }
+    this.banner = { title: "Double jump!", sub: `Press ${this.labels.jump} again in mid-air`, t: 5 };
+    this.talking = {
+      npc: null,
+      name: "Winged Spore",
+      lines: [
+        "The Winged Spore settles on your cap. You feel as light as a dandelion seed!",
+        `Now you can jump a second time in mid-air. Press ${this.labels.jump} twice to climb the shelf mushrooms up the giant trees.`,
+        "Rope bridges tie every treetop together. Two villages are hidden up there!",
+      ],
+      idx: 0,
+    };
+  }
+
+  // ---------- combat ----------
+  private startAttack() {
+    const p = this.p;
+    this.attackT = ATTACK_TIME;
+    this.attackCd = ATTACK_COOLDOWN;
+    this.swingHits = new Set();
+    sfx.puff();
+    const f = p.facing >= 0 ? 1 : -1;
+    for (let i = 0; i < 10; i++) {
+      this.spawn({ x: p.x + f * 6, y: p.y - 10 + (Math.random() - 0.5) * 8, vx: f * (60 + Math.random() * 90), vy: (Math.random() - 0.5) * 30, life: 0.2 + Math.random() * 0.15, color: i % 3 ? "#efe8c4" : "#b8d870", size: i % 2 ? 2 : 1, grav: -20, kind: "bit" });
+    }
+  }
+
+  private resolveAttack() {
+    const p = this.p;
+    for (const b of this.lvl.beetles) {
+      if (!b.alive || this.swingHits.has(b)) continue;
+      if (attackHits(p.x, p.y, p.facing, b.x, b.y - (b.big ? 8 : 4), b.big ? 12 : 5, b.big ? 8 : 5)) {
+        this.swingHits.add(b);
+        this.hitBeetle(b);
+      }
+    }
+    for (const f of this.lvl.flyers) {
+      if (!f.alive || this.swingHits.has(f)) continue;
+      if (attackHits(p.x, p.y, p.facing, f.x, f.y)) {
+        this.swingHits.add(f);
+        this.killFlyer(f);
+      }
+    }
+  }
+
+  private bits(x: number, y: number, n: number, a: string, b: string) {
+    for (let i = 0; i < n; i++) {
+      this.spawn({ x, y, vx: (Math.random() - 0.5) * 80, vy: -40 - Math.random() * 60, life: 0.8, color: i % 2 ? a : b, size: 1, grav: 300, kind: "bit" });
+    }
+  }
+
+  private hitBeetle(b: Beetle) {
+    if ((b.hitT ?? 0) > 0) return;
+    const hp = (b.hp ?? 1) - 1;
+    b.hp = hp;
+    if (hp > 0) {
+      b.hitT = 0.5;
+      const away = Math.sign(b.x - this.p.x) || 1;
+      b.x = clamp(b.x + away * 8, b.minX, b.maxX);
+      b.vx = away * Math.abs(b.vx || 30);
+      this.shakeT = 0.15;
+      sfx.bossHit();
+      this.bits(b.x, b.y - 10, 6, "#1f2e2b", "#f2c84b");
+      return;
+    }
+    b.alive = false;
+    b.respawn = this.scene === "dungeon" ? Infinity : 30;
+    sfx.stomp();
+    this.bits(b.x, b.y - 4, b.big ? 30 : 8, "#1f2e2b", "#4d8a7c");
+    if (b.big) {
+      this.shakeT = 0.5;
+      this.banner = { title: "Beetle King defeated!", sub: "The Winged Spore is waiting at the shrine", t: 4 };
+    }
+  }
+
+  private killFlyer(f: Flyer) {
+    f.alive = false;
+    f.respawn = this.scene === "dungeon" ? Infinity : 40;
+    sfx.stomp();
+    this.bits(f.x, f.y, 8, "#4a2f5e", "#bfdbe4");
+  }
+
+  private hurt(amount: number, fromX: number) {
+    const p = this.p;
+    this.vitals = takeDamage(this.vitals, amount);
+    if (this.mode === "fishing") this.endFishing("Ouch! You dropped your rod.");
+    p.invuln = 1.2;
+    p.vx = (Math.sign(p.x - fromX) || 1) * 150;
+    p.vy = -140;
+    p.onGround = false;
+    p.plat = null;
+    this.shakeT = 0.25;
+    sfx.hurt();
+    if (isDead(this.vitals)) this.die();
+  }
+
+  private updateFlyers(dt: number, active: boolean) {
+    const p = this.p;
+    const canFight = active && this.mode !== "releasing" && !this.fade;
+    for (const f of this.lvl.flyers) {
+      if (!f.alive) {
+        f.respawn -= dt;
+        if (f.respawn <= 0 && Math.abs(f.homeX - p.x) > this.W) {
+          f.alive = true;
+          f.x = f.homeX;
+          f.y = f.baseY;
+          f.state = "hover";
+          f.cd = 2;
+        }
+        continue;
+      }
+      if (Math.abs(f.x - p.x) > this.W * 1.5) continue;
+      stepFlyer(f, dt, canFight ? p.x : -99999, p.y, this.groundAt(f.x));
+      if (!canFight) continue;
+      if (Math.abs(f.x - p.x) < 7 && f.y > p.y - 24 && f.y < p.y + 4) {
+        if (p.vy > 20 && p.y <= f.y - 1) {
+          this.killFlyer(f);
+          p.vy = -190;
+          p.onGround = false;
+        } else if (p.invuln <= 0) this.hurt(FLYER_DAMAGE, f.x);
+      }
     }
   }
 
