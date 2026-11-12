@@ -26,7 +26,7 @@ export function attackHits(px: number, py: number, facing: number, tx: number, t
 }
 
 /** A section of the dungeon is cleared when every enemy tagged with it is defeated. */
-export function sectionCleared(enemies: { section?: number; alive: boolean }[], section: number) {
+export function sectionCleared(enemies: { section?: number | undefined; alive: boolean }[], section: number) {
   return enemies.every((e) => e.section !== section || !e.alive);
 }
 
