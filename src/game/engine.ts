@@ -1,15 +1,33 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
-import { appleTreeGeom, drawAppleTree, drawBeetle, drawFish, drawHouse, drawLine, drawMushroomPerson, fillCircle, rect } from "./sprites";
-import { FISH, addFish, fishById, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
+import { appleTreeGeom, drawAppleTree, drawBeetle, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, fillCircle, rect } from "./sprites";
+import { FISH, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
 import { sfx } from "./sfx";
-import { eatApple, isDead, takeDamage, tickVitals, type Vitals } from "./vitals";
+import { eatApple, eatGlowcap, isDead, nap, takeDamage, tickVitals, type Vitals } from "./vitals";
+import { ATTACK_COOLDOWN, ATTACK_REACH, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
+import {
+  DUNGEON_CEIL,
+  DUNGEON_FLOOR,
+  createDungeon,
+  drawDoorway,
+  drawDungeonBack,
+  drawDungeonFloor,
+  drawGate,
+  drawGlowcap,
+  drawShrine,
+  dungeonFloorY,
+  type Dungeon,
+} from "./dungeon";
+import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, drawRoom, moveInRoom, nearbyFurn, type Room, type RoomPlayer } from "./interior";
 import {
   GROUND_BASE,
   WORLD_W,
   generateWorld,
   hash1,
   mulberry32,
+  surfaceY,
+  type Beetle,
   type GiantTree,
+  type House,
   type Npc,
   type Platform,
   type Puddle,
@@ -24,12 +42,24 @@ const MAX_SPEED = 64;
 const GRAVITY = 640;
 const JUMP_V = 220;
 const APPLE_REGROW = 25;
-const BEETLE_DAMAGE = 15;
 const DAY_LENGTH = 240;
 const START_X = 230;
 const RELEASE_TIME = 3.6;
+const ROOM_SPEED = 46;
+const FADE = 0.5;
+/** Boss arena starts past the second root gate. */
+const BOSS_ARENA_X = 1100;
 
-export type Key = "left" | "right" | "jump" | "down" | "act";
+export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
+export type Scene = "forest" | "dungeon" | "room";
+
+interface Level {
+  w: number;
+  ground: Int16Array;
+  platforms: Platform[];
+  beetles: Beetle[];
+  flyers: Flyer[];
+}
 
 export interface HudState {
   health: number;
@@ -41,7 +71,7 @@ export interface HudState {
   banner: { title: string; sub: string } | null;
   dead: boolean;
   timeOfDay: string;
-  compass: { name: string; dir: -1 | 1; steps: number } | null;
+  compass: { name: string; dir: -1 | 1; steps: number; high: boolean } | null;
   resting: boolean;
   starving: boolean;
   applesEaten: number;
@@ -51,6 +81,11 @@ export interface HudState {
   inventory: { id: string; name: string; count: number }[];
   fishCaught: number;
   fishReleased: number;
+  coins: number;
+  coinPop: { amount: number; id: number } | null;
+  scene: Scene;
+  doubleJump: boolean;
+  boss: { hp: number; max: number } | null;
 }
 
 interface Particle {
@@ -97,16 +132,22 @@ export class Game {
   readonly H = VIEW_H;
   private ctx: CanvasRenderingContext2D;
   private world!: World;
-  private ground!: Int16Array;
+  private forestLvl!: Level;
+  private lvl!: Level;
+  private scene: Scene = "forest";
+  private dungeon: Dungeon | null = null;
+  private room: Room | null = null;
+  private rp: RoomPlayer = { x: 0, y: 0, facing: "up", walkT: 0, moving: false };
+  private returnPos = { x: 0, y: 0 };
   private p!: Player;
   private vitals!: Vitals;
-  private keys: Record<Key, boolean> = { left: false, right: false, jump: false, down: false, act: false };
+  private keys: Record<Key, boolean> = { left: false, right: false, up: false, down: false, jump: false, act: false, attack: false };
   private pressed = new Set<Key>();
   private camX = 0;
   private camY = 0;
   private time = 0;
   private particles: Particle[] = [];
-  private talking: { npc: Npc; idx: number } | null = null;
+  private talking: { npc: Npc | null; name: string; lines: string[]; idx: number } | null = null;
   private banner: { title: string; sub: string; t: number } | null = null;
   private running = false;
   private dead = false;
@@ -127,6 +168,17 @@ export class Game {
   private fishCaught = 0;
   private fishReleased = 0;
   private nearPuddle: Puddle | null = null;
+  private coins = 0;
+  private coinPop: { amount: number; id: number; t: number } | null = null;
+  private coinPopId = 0;
+  private hasDoubleJump = false;
+  private airJumps = 0;
+  private attackT = 0;
+  private attackCd = 0;
+  private swingHits = new Set<object>();
+  private paused = false;
+  private fade: { t: number; action: (() => void) | null } | null = null;
+  private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -142,8 +194,13 @@ export class Game {
   reset() {
     const { world, groundY } = generateWorld(1337);
     this.world = world;
-    this.ground = new Int16Array(WORLD_W + 1);
-    for (let x = 0; x <= WORLD_W; x++) this.ground[x] = groundY(x);
+    const ground = new Int16Array(WORLD_W + 1);
+    for (let x = 0; x <= WORLD_W; x++) ground[x] = groundY(x);
+    this.forestLvl = { w: WORLD_W, ground, platforms: world.platforms, beetles: world.beetles, flyers: world.flyers };
+    this.lvl = this.forestLvl;
+    this.scene = "forest";
+    this.dungeon = null;
+    this.room = null;
     this.p = {
       x: START_X,
       y: this.groundAt(START_X),
@@ -174,6 +231,14 @@ export class Game {
     this.toast = null;
     this.fishCaught = 0;
     this.fishReleased = 0;
+    this.coins = 0;
+    this.coinPop = null;
+    this.hasDoubleJump = false;
+    this.airJumps = 0;
+    this.attackT = 0;
+    this.attackCd = 0;
+    this.fade = null;
+    this.paused = false;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
     this.emitHud();
@@ -220,9 +285,29 @@ export class Game {
     (Object.keys(this.keys) as Key[]).forEach((k) => (this.keys[k] = false));
   }
 
+  /** Back to the main menu: world keeps rendering behind the menu but nothing plays. */
+  stop() {
+    this.running = false;
+  }
+
+  setPaused(p: boolean) {
+    this.paused = p;
+    if (p) this.clearKeys();
+  }
+
+  /** Key names shown in on-screen prompts (follows the player's key bindings). */
+  setLabels(l: { act: string; jump: string; down: string; attack: string }) {
+    this.labels = l;
+  }
+
+  private villageFloor(v: Village) {
+    return v.floorY ?? this.groundAt(v.x);
+  }
+
   private groundAt(x: number) {
-    const i = x < 0 ? 0 : x > WORLD_W ? WORLD_W : x | 0;
-    return this.ground[i] ?? GROUND_BASE;
+    const w = this.lvl.w;
+    const i = x < 0 ? 0 : x > w ? w : x | 0;
+    return this.lvl.ground[i] ?? GROUND_BASE;
   }
 
   private darkness() {
