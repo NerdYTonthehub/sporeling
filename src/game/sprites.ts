@@ -318,3 +318,27 @@ export function drawLine(ctx: Ctx, x0: number, y0: number, x1: number, y1: numbe
     ctx.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), 1, 1);
   }
 }
+
+/** A flying beetle centred on (x, y). Eyes glow red while it dives at you. */
+export function drawFlyer(ctx: Ctx, x: number, y: number, facing: number, flap: number, diving: boolean) {
+  const f = facing >= 0 ? 1 : -1;
+  const up = Math.floor(flap * 16) % 2 === 0;
+  const wy = up ? y - 7 : y - 3;
+  const wh = up ? 4 : 2;
+  rect(ctx, OUTLINE, x - 8, wy - 1, 7, wh + 2);
+  rect(ctx, OUTLINE, x + 1, wy - 1, 7, wh + 2);
+  rect(ctx, "#bfdbe4", x - 7, wy, 5, wh);
+  rect(ctx, "#bfdbe4", x + 2, wy, 5, wh);
+  rect(ctx, "#ffffff", x - 6, wy, 2, 1);
+  rect(ctx, "#ffffff", x + 3, wy, 2, 1);
+  rect(ctx, "#0d1110", x - 3, y + 3, 1, 2);
+  rect(ctx, "#0d1110", x, y + 3, 1, 2);
+  rect(ctx, "#0d1110", x + 2, y + 3, 1, 1);
+  rect(ctx, "#0d1110", x - 5, y - 3, 10, 7);
+  rect(ctx, "#4a2f5e", x - 4, y - 2, 8, 5);
+  rect(ctx, "#8a6ab8", f > 0 ? x - 3 : x + 1, y - 2, 2, 1);
+  rect(ctx, "#0d1110", x, y - 2, 1, 5);
+  rect(ctx, "#0d1110", f > 0 ? x + 5 : x - 7, y - 2, 3, 4);
+  rect(ctx, diving ? "#ff5a3a" : "#e9dcc4", x + f * 6, y - 1, 1, 1);
+  rect(ctx, "#0d1110", x + f * 7, y - 4, 1, 2);
+}

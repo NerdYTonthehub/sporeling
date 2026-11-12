@@ -71,6 +71,19 @@ export const sfx = {
   },
   door: () => tone(220, 0.15, "triangle", 0.05, 80),
   menu: () => tone(660, 0.05, "square", 0.03),
+  puff: () => tone(240, 0.12, "triangle", 0.05, -140),
+  djump: () => {
+    tone(520, 0.08, "square", 0.03, 300);
+    tone(880, 0.1, "triangle", 0.03, 200, 0.05);
+  },
+  bossHit: () => tone(140, 0.18, "sawtooth", 0.06, -60),
+  gate: () => {
+    tone(110, 0.45, "sawtooth", 0.05, 60);
+    tone(165, 0.4, "triangle", 0.04, 40, 0.12);
+  },
+  nap: () => {
+    [392, 330, 262].forEach((f, i) => tone(f, 0.3, "triangle", 0.035, 0, i * 0.25));
+  },
   die: () => {
     [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, "square", 0.04, -20, i * 0.18));
   },
