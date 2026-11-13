@@ -207,3 +207,13 @@
 @utility animate-blink {
   animation: blink-steps 0.8s steps(1) infinite;
 }
+
+.game-settings { max-height: calc(100dvh - 24px); }
+.game-hud { max-width: calc(100% - 220px); }
+@media (max-width: 640px) {
+  .game-hud { max-width: calc(100% - 145px); }
+  .game-hud .exploration-detail { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-bob, .animate-banner, .animate-blink { animation: none; }
+}

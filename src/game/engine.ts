@@ -283,6 +283,7 @@ export class Game {
 
   clearKeys() {
     (Object.keys(this.keys) as Key[]).forEach((k) => (this.keys[k] = false));
+    this.pressed.clear();
   }
 
   /** Back to the main menu: world keeps rendering behind the menu but nothing plays. */
@@ -1309,6 +1310,73 @@ export class Game {
 
   // ---------- render ----------
   private render() {
+    if (this.scene === "room" && this.room) {
+      drawRoom(this.ctx, this.room, this.W, this.H, this.rp, this.time, this.darkness());
+    } else if (this.scene === "dungeon" && this.dungeon) {
+      this.renderDungeon(this.dungeon);
+    } else {
+      this.renderForest();
+    }
+    if (this.fade) {
+      this.ctx.globalAlpha = Math.max(0, 1 - Math.abs(this.fade.t / FADE * 2 - 1));
+      rect(this.ctx, "#080c09", 0, 0, this.W, this.H);
+      this.ctx.globalAlpha = 1;
+    }
+  }
+
+  private renderDungeon(d: Dungeon) {
+    const ctx = this.ctx;
+    const cx = Math.round(this.camX);
+    const cy = Math.round(this.camY);
+    drawDungeonBack(ctx, d, cx, cy, this.W, this.H, this.time);
+    drawDoorway(ctx, d.entryX, cx, cy, this.darkness() > 0.5);
+    drawDoorway(ctx, d.exitX, cx, cy, this.darkness() > 0.5);
+    for (const pl of d.platforms) this.drawPlatform(pl, cx, cy);
+    drawDungeonFloor(ctx, d, cx, cy, this.W, this.H);
+    for (const g of d.glowcaps) drawGlowcap(ctx, g, cx, cy);
+    drawShrine(ctx, d, cx, cy, this.time);
+    this.drawEnemies(cx, cy);
+    const p = this.p;
+    if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
+      drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), { facing: p.facing, walk: p.walkT, moving: Math.abs(p.vx) > 4, air: !p.onGround, cap: "#d9443a", spots: true, scale: 1, blink: this.dead || p.blinkT < 0 });
+    }
+    this.drawAttack(cx, cy);
+    this.drawParticles(cx, cy, false);
+    this.drawParticles(cx, cy, true);
+    for (const g of d.gates) drawGate(ctx, g, cx, cy, this.time);
+  }
+
+  private drawEnemies(cx: number, cy: number) {
+    const ctx = this.ctx;
+    for (const b of this.lvl.beetles) {
+      if (!b.alive || b.x - cx < -30 || b.x - cx > this.W + 30) continue;
+      if ((b.hitT ?? 0) > 0 && Math.floor(this.time * 20) % 2 === 0) continue;
+      if (b.big) {
+        ctx.save();
+        ctx.translate(Math.round(b.x - cx), Math.round(b.y - cy));
+        ctx.scale(2, 2);
+        drawBeetle(ctx, 0, 0, Math.sign(b.vx), b.walkT);
+        rect(ctx, "#f2c84b", -4, -12, 8, 2);
+        for (const x of [-4, 0, 3]) rect(ctx, "#f2c84b", x, -15, 1, 3);
+        ctx.restore();
+      } else drawBeetle(ctx, Math.round(b.x - cx), Math.round(b.y - cy), Math.sign(b.vx), b.walkT);
+    }
+    for (const f of this.lvl.flyers) {
+      if (!f.alive || f.x - cx < -20 || f.x - cx > this.W + 20) continue;
+      drawFlyer(ctx, Math.round(f.x - cx), Math.round(f.y - cy), Math.sign(f.vx), f.flap, f.state === "dive");
+    }
+  }
+
+  private drawAttack(cx: number, cy: number) {
+    if (this.attackT <= 0) return;
+    const f = this.p.facing;
+    for (let i = 0; i < 8; i++) {
+      const progress = 1 - this.attackT / ATTACK_TIME;
+      rect(this.ctx, i % 2 ? "#efe8c4" : "#b8d870", Math.round(this.p.x - cx + f * (8 + progress * 12 + i % 3)), Math.round(this.p.y - cy - 8 - i * 2), 2, 2);
+    }
+  }
+
+  private renderForest() {
     const ctx = this.ctx;
     const W = this.W;
     const H = this.H;
@@ -1349,12 +1417,7 @@ export class Game {
       drawAppleTree(ctx, sx, this.groundAt(t.x) - cy, t.size, t.apples, Math.sin(this.time * 0.8 + t.x) * 0.6);
     }
     this.drawDecor(cx, cy);
-    for (const b of this.world.beetles) {
-      if (!b.alive) continue;
-      const sx = Math.round(b.x - cx);
-      if (sx < -20 || sx > W + 20) continue;
-      drawBeetle(ctx, sx, b.y - cy, Math.sign(b.vx), b.walkT);
-    }
+    this.drawEnemies(cx, cy);
     for (const v of this.world.villages) {
       for (const n of v.npcs) {
         const sx = Math.round(n.x - cx);
@@ -1396,6 +1459,7 @@ export class Game {
       ctx.globalAlpha = 1;
     }
     this.drawFishingGear(cx, cy);
+    this.drawAttack(cx, cy);
 
     this.drawParticles(cx, cy, false);
     this.drawFgGrass(cx, cy);
@@ -1574,14 +1638,44 @@ export class Game {
     fillCircle(ctx, kx, ky, 4);
     ctx.fillStyle = "#130d09";
     fillCircle(ctx, kx, ky + 1, 2);
+    if (t.elder) {
+      const dx = sx + Math.round(t.w / 2);
+      rect(ctx, "#1b140f", dx - 15, g - 35, 30, 35);
+      rect(ctx, "#5fd6c4", dx - 12, g - 32, 24, 2);
+      rect(ctx, "#080c09", dx - 12, g - 30, 24, 30);
+      rect(ctx, "#5fd6c4", dx - 2, g - 24, 4, 3);
+      rect(ctx, "#a8fff0", dx - 1, g - 23, 2, 1);
+      rect(ctx, "#7a5536", dx - 18, g - 2, 36, 2);
+    }
   }
 
   private drawPlatform(pl: Platform, cx: number, cy: number) {
     const sx = Math.round(pl.x - cx);
     if (sx > this.W || sx + pl.w < 0) return;
     const sy = Math.round(pl.y - cy);
-    const [base, dark, light] = (FUNGUS[pl.color] ?? FUNGUS[0]) as [string, string, string];
     const ctx = this.ctx;
+    if (pl.kind === "bridge") {
+      for (let wx = Math.max(pl.x, cx - 2); wx < Math.min(pl.x + pl.w, cx + this.W + 2); wx += 1) {
+        const x = Math.round(wx - cx);
+        const y = Math.round(surfaceY(pl, wx) - cy);
+        rect(ctx, "#3a281c", x, y, 1, 4);
+        if ((Math.floor(wx - pl.x) % 5) !== 4) rect(ctx, "#b38a54", x, y, 1, 2);
+        rect(ctx, "#d5bd83", x, y - 14, 1, 1);
+        if (Math.floor(wx - pl.x) % 24 === 0) rect(ctx, "#8a6342", x, y - 14, 1, 18);
+      }
+      return;
+    }
+    if (pl.kind === "deck") {
+      rect(ctx, "#3a281c", sx - 1, sy, pl.w + 2, 7);
+      rect(ctx, "#b38a54", sx, sy, pl.w, 2);
+      for (let x = 3; x < pl.w; x += 8) rect(ctx, "#6b4a30", sx + x, sy + 2, 1, 4);
+      for (const x of [sx + 6, sx + pl.w - 9]) {
+        rect(ctx, "#6b4a30", x, sy + 7, 3, 14);
+        rect(ctx, "#8a6342", x, sy - 16, 2, 16);
+      }
+      return;
+    }
+    const [base, dark, light] = (FUNGUS[pl.color] ?? FUNGUS[0]) as [string, string, string];
     rect(ctx, "#1b140f", sx - 1, sy - 1, pl.w + 2, 3);
     rect(ctx, "#1b140f", sx, sy + 2, pl.w, 2);
     rect(ctx, "#1b140f", sx + 2, sy + 4, pl.w - 4, 2);
@@ -1690,7 +1784,7 @@ export class Game {
   private drawVillage(v: Village, cx: number, cy: number, night: number) {
     const ctx = this.ctx;
     if (Math.abs(v.x - cx - this.W / 2) > this.W / 2 + v.half + 40) return;
-    const gy = this.groundAt(v.x) - cy;
+    const gy = this.villageFloor(v) - cy;
     // sign post at both entrances
     for (const side of [-1, 1]) {
       const sx = Math.round(v.x + side * (v.half + 10) - cx);
@@ -1966,7 +2060,7 @@ export class Game {
     };
     for (const v of this.world.villages) {
       if (Math.abs(v.x - cx - this.W / 2) > this.W + v.half) continue;
-      const gy = this.groundAt(v.x) - cy;
+      const gy = this.villageFloor(v) - cy;
       const flick = 0.85 + Math.sin(this.time * 13) * 0.08 + Math.sin(this.time * 7.3) * 0.07;
       glow(v.fireX - cx, gy - 6, 50, "255,150,60", (0.18 + night * 0.4) * flick);
       for (const lx of v.lanterns) glow(lx - cx, gy - 27, 26, "255,200,100", night * 0.45);
