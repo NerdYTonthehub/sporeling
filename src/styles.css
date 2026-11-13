@@ -209,6 +209,8 @@
 }
 
 .game-settings { max-height: calc(100dvh - 24px); }
+.game-tool { font-family: var(--font-body); cursor: pointer; }
+.game-tool:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .game-hud { max-width: calc(100% - 220px); }
 @media (max-width: 640px) {
   .game-hud { max-width: calc(100% - 145px); }

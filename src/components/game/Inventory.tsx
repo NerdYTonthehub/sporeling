@@ -36,8 +36,8 @@ export function InventoryPanel({
       >
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm text-accent">Fish bag</h2>
-          <GameButton onClick={onClose} className="text-xl text-muted-foreground hover:text-foreground">
-            close · I
+          <GameButton variant="plain" onClick={onClose} aria-label="Close fish bag" className="px-2 text-xl text-muted-foreground hover:text-foreground">
+            ×
           </GameButton>
         </div>
         <p className="mt-1 text-xl text-muted-foreground">{hud.scene !== "forest" ? "The sky is outside." : hud.inventory.length ? `${hud.coins} coins` : "Your bag is empty."}</p>
@@ -47,6 +47,7 @@ export function InventoryPanel({
             if (!item) return <div key={i} className="aspect-square border-[3px] border-border bg-muted/60" />;
             return (
               <GameButton
+                variant="plain"
                 key={item.id}
                 onClick={() => onRelease(item.id)}
                 disabled={hud.scene !== "forest" || hud.releasing}

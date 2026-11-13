@@ -207,6 +207,7 @@ export function GameScreen() {
                   <span className="exploration-detail">{hud.applesEaten} apples eaten</span>
                   <span>·</span>
                   <GameButton
+                    variant="plain"
                     onClick={() => {
                       gameRef.current?.clearKeys();
                       setInvOpen((o) => !o);
@@ -215,7 +216,7 @@ export function GameScreen() {
                   >
                     fish bag ({hud.inventory.reduce((n, f) => n + f.count, 0)})
                   </GameButton>
-                  <GameButton onClick={toggleMute} aria-label={settings.sound ? "Mute sound" : "Enable sound"} className="px-1 text-foreground">
+                  <GameButton variant="plain" onClick={toggleMute} aria-label={settings.sound ? "Mute sound" : "Enable sound"} className="px-1 text-foreground">
                     {settings.sound ? "♪" : "♫×"}
                   </GameButton>
                 </div>
@@ -231,7 +232,7 @@ export function GameScreen() {
 
               {/* Village banner */}
               {hud.banner && !hud.dialog && !hud.dead && (
-                <div key={hud.banner.title} className="animate-banner pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 text-center">
+                <div key={hud.banner.title} className="animate-banner pointer-events-none absolute left-1/2 top-[24%] w-[92%] -translate-x-1/2 text-center">
                   <div className="font-display text-xl text-accent drop-shadow-[3px_3px_0_var(--color-border)] sm:text-3xl">
                     {hud.banner.title}
                   </div>
@@ -248,7 +249,7 @@ export function GameScreen() {
 
               {/* Toast (fishing results etc.) */}
               {hud.toast && !hud.dialog && (
-                <div key={hud.toast} className="pixel-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 px-4 py-2 text-2xl text-foreground">
+                <div key={hud.toast} className="pixel-panel pointer-events-none absolute left-1/2 top-[39%] w-max max-w-[92%] -translate-x-1/2 px-4 py-2 text-center text-xl text-foreground">
                   {hud.toast}
                 </div>
               )}
