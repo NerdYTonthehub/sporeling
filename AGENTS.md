@@ -35,3 +35,5 @@ use the editor.
 - Health/hunger rules live as pure functions in `src/game/vitals.ts` with tests in `vitals.test.ts` — change numbers there, not inside the engine.
 - Fishing rules, fish species, inventory helpers and the shared fish pixel grid live in `src/game/fishing.ts` (tested in `fishing.test.ts`); the engine owns the inventory and exposes `releaseFish(id)` for the React fish bag — one source of truth for both canvas and HUD.
 - All game art is drawn procedurally with integer `fillRect`s on a low-res canvas (225px tall) scaled with `image-rendering: pixelated` — keeps a consistent pixel look without sprite assets.
+- Scene-specific canvas renderers draw forest, dungeon, and top-down rooms; the engine owns transitions and progression so React never simulates gameplay.
+- Game controls use the shared GameButton; settings map keyboard codes through the pure settings helpers and persist only device preferences locally, keeping menus and remapped gameplay consistent.
