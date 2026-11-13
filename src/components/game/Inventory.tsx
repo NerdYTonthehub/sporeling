@@ -1,5 +1,6 @@
-import { FISH_H, FISH_W, fishById, fishPixels } from "@/game/fishing";
+import { FISH_H, FISH_W, fishById, fishPixels, releaseReward } from "@/game/fishing";
 import type { HudState } from "@/game/engine";
+import { GameButton } from "./GameButton";
 
 export function FishIcon({ id, size = 40 }: { id: string; size?: number }) {
   const sp = fishById(id);
@@ -35,34 +36,33 @@ export function InventoryPanel({
       >
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm text-accent">Fish bag</h2>
-          <button onClick={onClose} className="text-xl text-muted-foreground hover:text-foreground">
+          <GameButton onClick={onClose} className="text-xl text-muted-foreground hover:text-foreground">
             close · I
-          </button>
+          </GameButton>
         </div>
-        <p className="mt-1 text-xl leading-tight text-muted-foreground">
-          {hud.inventory.length
-            ? "Click a fish to hold it up to the sky and set it free."
-            : "No fish yet. Stand by a puddle, press E to fish, and hit SPACE when the ! appears."}
-        </p>
+        <p className="mt-1 text-xl text-muted-foreground">{hud.scene !== "forest" ? "The sky is outside." : hud.inventory.length ? `${hud.coins} coins` : "Your bag is empty."}</p>
         <div className="mt-3 grid grid-cols-4 gap-2">
           {Array.from({ length: Math.max(slots, hud.inventory.length) }, (_, i) => {
             const item = hud.inventory[i];
             if (!item) return <div key={i} className="aspect-square border-[3px] border-border bg-muted/60" />;
             return (
-              <button
+              <GameButton
                 key={item.id}
                 onClick={() => onRelease(item.id)}
+                disabled={hud.scene !== "forest" || hud.releasing}
                 className="group relative flex aspect-square flex-col items-center justify-center gap-1 border-[3px] border-border bg-muted p-1 transition-transform hover:-translate-y-1 hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring"
-                title={`Release ${item.name}`}
+                aria-label={`Release ${item.name}`}
+                title={`Release ${item.name} · +${releaseReward(item.id)} coins`}
               >
                 <span className="group-hover:animate-bob">
                   <FishIcon id={item.id} size={30} />
                 </span>
                 <span className="text-center text-base leading-none text-foreground">{item.name}</span>
+                <span className="text-sm text-accent">+{releaseReward(item.id)} ◉</span>
                 {item.count > 1 && (
                   <span className="absolute right-1 top-0 font-display text-[9px] text-accent">×{item.count}</span>
                 )}
-              </button>
+              </GameButton>
             );
           })}
         </div>

@@ -66,7 +66,8 @@ const ARROWS: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", Ar
 
 export function keyLabel(code: string | null): string {
   if (!code) return "—";
-  if (ARROWS[code]) return ARROWS[code]!;
+  const arrow = ARROWS[code];
+  if (arrow) return arrow;
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
   if (code.startsWith("Numpad")) return "Num " + code.slice(6);
