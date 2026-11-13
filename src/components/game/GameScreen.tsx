@@ -1,29 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, VIEW_H, type HudState, type Key } from "@/game/engine";
-import { initAudio, setMuted } from "@/game/sfx";
+import { initAudio, setMuted, setVolume } from "@/game/sfx";
 import { PixelIcon } from "./PixelIcon";
 import { InventoryPanel } from "./Inventory";
-
-const KEYMAP: Record<string, Key> = {
-  ArrowLeft: "left",
-  a: "left",
-  A: "left",
-  ArrowRight: "right",
-  d: "right",
-  D: "right",
-  ArrowUp: "jump",
-  w: "jump",
-  W: "jump",
-  " ": "jump",
-  ArrowDown: "down",
-  s: "down",
-  S: "down",
-  e: "act",
-  E: "act",
-  f: "act",
-  F: "act",
-  Enter: "act",
-};
+import { GameButton } from "./GameButton";
+import { SettingsPanel } from "./SettingsPanel";
+import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, actionForCode, parseSettings, primaryLabel, type Settings } from "@/game/settings";
 
 function Bar({ value, icon, label, fill, dim, warn }: { value: number; icon: "heart" | "apple"; label: string; fill: string; dim: string; warn?: boolean }) {
   const segments = 10;
@@ -35,7 +17,7 @@ function Bar({ value, icon, label, fill, dim, warn }: { value: number; icon: "he
       </span>
       <div className="flex gap-[2px] border-[3px] border-border bg-border p-[2px]">
         {Array.from({ length: segments }, (_, i) => (
-          <div key={i} className={`h-3 w-3 sm:h-4 sm:w-4 ${i < filled ? fill : dim}`} />
+          <div key={i} className={`h-2 w-2 sm:h-4 sm:w-4 ${i < filled ? fill : dim}`} />
         ))}
       </div>
     </div>
@@ -48,7 +30,13 @@ export function GameScreen() {
   const gameRef = useRef<Game | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [started, setStarted] = useState(false);
-  const [muted, setMutedState] = useState(false);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [menu, setMenu] = useState<"main" | "pause" | "settings" | null>("main");
+  const [ready, setReady] = useState(false);
+  const menuRef = useRef(menu);
+  const settingsRef = useRef(settings);
+  menuRef.current = menu;
+  settingsRef.current = settings;
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [touch, setTouch] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
@@ -58,6 +46,23 @@ export function GameScreen() {
   invOpenRef.current = invOpen;
   startedRef.current = started;
   deadRef.current = !!hud?.dead;
+
+  useEffect(() => {
+    try { setSettings(parseSettings(localStorage.getItem(SETTINGS_STORAGE_KEY))); } catch { /* Browser storage may be unavailable. */ }
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    setMuted(!settings.sound);
+    setVolume(settings.volume);
+    gameRef.current?.setLabels({ act: primaryLabel(settings.keys, "act"), jump: primaryLabel(settings.keys, "jump"), down: primaryLabel(settings.keys, "down"), attack: primaryLabel(settings.keys, "attack") });
+    if (ready) { try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch { /* Settings still work for this session. */ } }
+  }, [settings, ready]);
+
+  useEffect(() => {
+    gameRef.current?.setPaused(menu !== null || invOpen);
+    gameRef.current?.clearKeys();
+  }, [menu, invOpen]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -81,24 +86,27 @@ export function GameScreen() {
     setTouch(window.matchMedia("(pointer: coarse)").matches);
 
     const down = (e: KeyboardEvent) => {
-      if (e.key === "i" || e.key === "I" || e.key === "Tab" || (e.key === "Escape" && invOpenRef.current)) {
+      if (e.code === "Escape") {
         e.preventDefault();
-        if (!startedRef.current || deadRef.current) return;
-        const next = e.key === "Escape" ? false : !invOpenRef.current;
         game.clearKeys();
-        setInvOpen(next);
+        if (invOpenRef.current) setInvOpen(false);
+        else if (menuRef.current === "settings") setMenu(startedRef.current ? "pause" : "main");
+        else if (startedRef.current) setMenu(menuRef.current === "pause" ? null : "pause");
         return;
       }
-      if (invOpenRef.current) return;
-      const k = KEYMAP[e.key];
-      if (!k) return;
+      if (menuRef.current !== null || deadRef.current) return;
+      const action = actionForCode(settingsRef.current.keys, e.code);
+      if (!action) return;
       e.preventDefault();
-      game.setKey(k, true);
+      if (action === "bag") {
+        if (e.repeat) return;
+        game.clearKeys();
+        setInvOpen((open) => !open);
+      } else if (!invOpenRef.current) game.setKey(action, true);
     };
     const up = (e: KeyboardEvent) => {
-      const k = KEYMAP[e.key];
-      if (!k) return;
-      game.setKey(k, false);
+      const action = actionForCode(settingsRef.current.keys, e.code);
+      if (action && action !== "bag") game.setKey(action, false);
     };
     const blur = () => game.clearKeys();
     window.addEventListener("keydown", down);
@@ -115,8 +123,10 @@ export function GameScreen() {
 
   const start = useCallback(() => {
     initAudio();
-    gameRef.current?.start();
+    if (startedRef.current) gameRef.current?.start();
+    else gameRef.current?.restart();
     setStarted(true);
+    setMenu(null);
   }, []);
 
   const restart = useCallback(() => {
@@ -131,15 +141,6 @@ export function GameScreen() {
   }, []);
 
   useEffect(() => {
-    if (started) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") start();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [started, start]);
-
-  useEffect(() => {
     if (!hud?.dead) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "r" || e.key === "R") restart();
@@ -148,9 +149,13 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [hud?.dead, restart]);
 
-  const toggleMute = () => {
-    setMuted(!muted);
-    setMutedState(!muted);
+  const toggleMute = () => setSettings((current) => ({ ...current, sound: !current.sound }));
+  const exitToMenu = () => {
+    gameRef.current?.stop();
+    gameRef.current?.clearKeys();
+    setStarted(false);
+    setInvOpen(false);
+    setMenu("main");
   };
 
   const hold = (k: Key) => ({
@@ -168,19 +173,19 @@ export function GameScreen() {
     <main className="fixed inset-0 flex select-none items-center justify-center overflow-hidden bg-background">
       <div ref={wrapRef} className="absolute inset-0 flex items-center justify-center">
         <div className="relative" style={{ width: box.w, height: box.h }}>
-          <canvas ref={canvasRef} className="pixelated block h-full w-full" aria-label="Sporeling game world" />
+          <canvas ref={canvasRef} className="pixelated block h-full w-full" aria-label="Sporeling game world" data-ready={ready} />
           <div className="vignette pointer-events-none absolute inset-0" />
 
           {hud && started && (
             <>
               {/* Top-left vitals */}
-              <div className="pixel-panel absolute left-3 top-3 flex flex-col gap-2 px-3 py-2">
+              <div className="pixel-panel absolute left-2 top-2 flex flex-col gap-2 px-2 py-2 sm:left-3 sm:top-3 sm:px-3">
                 <Bar value={hud.health} icon="heart" label="Health" fill="bg-health" dim="bg-health-dim" warn={hud.health < 25} />
                 <Bar value={hud.hunger} icon="apple" label="Hunger" fill="bg-hunger" dim="bg-hunger-dim" warn={hud.hunger < 20} />
               </div>
 
               {/* Top-right exploration */}
-              <div className="pixel-panel absolute right-3 top-3 flex flex-col items-end gap-1 px-3 py-2 text-right">
+              <div className="game-hud pixel-panel absolute right-2 top-2 flex flex-col items-end gap-1 px-2 py-2 text-right sm:right-3 sm:top-3 sm:px-3">
                 <div className="flex items-center gap-2 font-display text-[10px] text-foreground">
                   <PixelIcon name="shroom" size={16} />
                   <span>
@@ -188,37 +193,46 @@ export function GameScreen() {
                   </span>
                 </div>
                 {hud.compass ? (
-                  <div className="text-lg leading-none text-accent">
+                  <div className="exploration-detail text-lg leading-none text-accent">
                     {hud.compass.dir < 0 ? "◀ " : ""}
                     {hud.compass.name} · {hud.compass.steps} steps
                     {hud.compass.dir > 0 ? " ▶" : ""}
                   </div>
                 ) : (
-                  <div className="text-lg leading-none text-accent">Every village found!</div>
+                  <div className="exploration-detail text-lg leading-none text-accent">Every village found!</div>
                 )}
-                <div className="flex items-center gap-3 text-base leading-none text-muted-foreground">
-                  <span>{hud.timeOfDay}</span>
+                <div className="flex flex-wrap items-center justify-end gap-2 text-base leading-none text-muted-foreground">
+                  <span className="exploration-detail">{hud.scene === "room" ? "Indoors" : hud.scene === "dungeon" ? "Elder Tree" : hud.timeOfDay}</span>
                   <span>·</span>
-                  <span>{hud.applesEaten} apples eaten</span>
+                  <span className="exploration-detail">{hud.applesEaten} apples eaten</span>
                   <span>·</span>
-                  <button
+                  <GameButton
+                    variant="plain"
                     onClick={() => {
                       gameRef.current?.clearKeys();
                       setInvOpen((o) => !o);
                     }}
                     className="text-foreground underline-offset-2 hover:underline"
                   >
-                    fish bag ({hud.inventory.reduce((n, f) => n + f.count, 0)}) · I
-                  </button>
-                  <button onClick={toggleMute} className="text-foreground underline-offset-2 hover:underline">
-                    {muted ? "sound off" : "sound on"}
-                  </button>
+                    fish bag ({hud.inventory.reduce((n, f) => n + f.count, 0)})
+                  </GameButton>
+                  <GameButton variant="plain" onClick={toggleMute} aria-label={settings.sound ? "Mute sound" : "Enable sound"} className="px-1 text-foreground">
+                    {settings.sound ? "♪" : "♫×"}
+                  </GameButton>
                 </div>
               </div>
 
+              <div className="pixel-panel absolute left-2 top-[78px] flex items-center gap-3 px-3 py-1 text-xl sm:top-[100px]">
+                <span aria-label={`${hud.coins} coins`} className="text-accent">◉ {hud.coins}</span>
+                {hud.doubleJump && <span title="Double jump unlocked" aria-label="Double jump unlocked" className="text-secondary-foreground">↑↑</span>}
+                <GameButton aria-label="Pause game" onClick={() => setMenu("pause")} className="px-2 py-1 text-xs">Ⅱ</GameButton>
+              </div>
+              {hud.coinPop && <div key={hud.coinPop.id} className="animate-banner pointer-events-none absolute left-4 top-[140px] text-2xl text-accent">+{hud.coinPop.amount} coins</div>}
+              {hud.boss && <div className="pixel-panel absolute bottom-14 left-1/2 w-[min(80%,320px)] -translate-x-1/2 px-4 py-2 text-center"><div className="mb-2 font-display text-xs text-accent">Beetle King</div><div className="flex gap-1">{Array.from({ length: hud.boss.max }, (_, i) => <div key={i} className={`h-3 flex-1 ${i < (hud.boss?.hp ?? 0) ? "bg-health" : "bg-health-dim"}`} />)}</div></div>}
+
               {/* Village banner */}
               {hud.banner && !hud.dialog && !hud.dead && (
-                <div key={hud.banner.title} className="animate-banner pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 text-center">
+                <div key={hud.banner.title} className="animate-banner pointer-events-none absolute left-1/2 top-[24%] w-[92%] -translate-x-1/2 text-center">
                   <div className="font-display text-xl text-accent drop-shadow-[3px_3px_0_var(--color-border)] sm:text-3xl">
                     {hud.banner.title}
                   </div>
@@ -235,7 +249,7 @@ export function GameScreen() {
 
               {/* Toast (fishing results etc.) */}
               {hud.toast && !hud.dialog && (
-                <div key={hud.toast} className="pixel-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 px-4 py-2 text-2xl text-foreground">
+                <div key={hud.toast} className="pixel-panel pointer-events-none absolute left-1/2 top-[39%] w-max max-w-[92%] -translate-x-1/2 px-4 py-2 text-center text-xl text-foreground">
                   {hud.toast}
                 </div>
               )}
@@ -243,7 +257,7 @@ export function GameScreen() {
               {/* Bite! */}
               {hud.fishing === "bite" && (
                 <div className="animate-blink pointer-events-none absolute left-1/2 top-[40%] -translate-x-1/2 font-display text-2xl text-accent drop-shadow-[3px_3px_0_var(--color-border)]">
-                  SPACE!
+                  {primaryLabel(settings.keys, "jump").toUpperCase()}!
                 </div>
               )}
 
@@ -253,7 +267,7 @@ export function GameScreen() {
                   <div className="font-display text-[11px] text-accent">{hud.dialog.name}</div>
                   <p className="mt-2 text-2xl leading-tight text-foreground">{hud.dialog.text}</p>
                   <div className="mt-1 text-right text-base text-muted-foreground">
-                    {hud.dialog.page}/{hud.dialog.pages} · press E
+                    {hud.dialog.page}/{hud.dialog.pages} · press {primaryLabel(settings.keys, "act")}
                   </div>
                 </div>
               ) : (
@@ -276,9 +290,9 @@ export function GameScreen() {
                     <p className="max-w-xs text-xl text-foreground">
                       You found {hud.found} of {hud.total} villages and ate {hud.applesEaten} apples.
                     </p>
-                    <button onClick={restart} className="pixel-btn px-5 py-3 text-xs">
+                    <GameButton onClick={restart} className="pixel-btn px-5 py-3 text-xs">
                       Sprout again
-                    </button>
+                    </GameButton>
                     <span className="text-base text-muted-foreground">or press R</span>
                   </div>
                 </div>
@@ -286,63 +300,48 @@ export function GameScreen() {
             </>
           )}
 
-          {/* Title screen */}
-          {!started && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/40">
-              <div className="flex flex-col items-center gap-5 px-6 text-center">
-                <div className="animate-bob">
-                  <PixelIcon name="shroom" size={56} />
+          {/* Menus */}
+          {menu !== null && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60">
+              {menu === "settings" ? <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setMenu(started ? "pause" : "main")} /> : (
+                <div className="flex max-h-full flex-col items-center gap-4 overflow-y-auto px-6 py-4 text-center">
+                  <div className="animate-bob"><PixelIcon name="shroom" size={48} /></div>
+                  <h1 className="font-display text-2xl text-accent drop-shadow-[4px_4px_0_var(--color-border)] sm:text-4xl">{menu === "main" ? "SPORELING" : "Paused"}</h1>
+                  <GameButton disabled={!ready} onClick={start} className="w-56 px-6 py-4 text-sm">{menu === "main" ? "Play" : "Resume"}</GameButton>
+                  <GameButton onClick={() => setMenu("settings")} className="w-56 px-6 py-4 text-sm">Settings</GameButton>
+                  {menu === "pause" && <GameButton onClick={exitToMenu} className="w-56 px-4 py-4 text-xs">Exit to main menu</GameButton>}
                 </div>
-                <h1 className="font-display text-3xl text-accent drop-shadow-[4px_4px_0_var(--color-border)] sm:text-5xl">
-                  SPORELING
-                </h1>
-                <p className="max-w-md text-2xl leading-tight text-foreground drop-shadow-[2px_2px_0_var(--color-border)]">
-                  You are very small. The forest is very big. Find the hidden mushroom villages, and don't forget to eat.
-                </p>
-                <button onClick={start} className="pixel-btn px-6 py-4 text-sm">
-                  Start
-                </button>
-                <div className="pixel-panel grid grid-cols-2 gap-x-6 gap-y-1 px-4 py-3 text-left text-xl text-foreground">
-                  <span className="text-accent">← → / A D</span>
-                  <span>walk</span>
-                  <span className="text-accent">Space / W</span>
-                  <span>jump</span>
-                  <span className="text-accent">S / ↓</span>
-                  <span>drop down</span>
-                  <span className="text-accent">E</span>
-                  <span>eat · talk · fish</span>
-                  <span className="text-accent">I</span>
-                  <span>fish bag</span>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
           {/* Touch controls */}
-          {touch && started && !hud?.dead && (
+          {touch && started && !hud?.dead && menu === null && !invOpen && (
             <>
-              <div className="absolute bottom-4 left-4 flex gap-3">
-                <button aria-label="Walk left" className="pixel-btn h-14 w-14 touch-none text-lg" {...hold("left")}>
+              <div className="absolute bottom-4 left-4 flex gap-2">
+                <GameButton aria-label="Walk left" className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-lg" {...hold("left")}>
                   ◀
-                </button>
-                <button aria-label="Walk right" className="pixel-btn h-14 w-14 touch-none text-lg" {...hold("right")}>
+                </GameButton>
+                <GameButton aria-label="Walk right" className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-lg" {...hold("right")}>
                   ▶
-                </button>
+                </GameButton>
               </div>
-              <div className="absolute bottom-4 right-4 flex gap-3">
-                <button
+              <div className="absolute bottom-4 right-4 flex gap-2">
+                <GameButton
                   aria-label="Open fish bag"
-                  className="pixel-btn h-14 w-14 touch-none text-xs"
+                  className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-xs"
                   onClick={() => setInvOpen((o) => !o)}
                 >
-                  BAG
-                </button>
-                <button aria-label="Eat or talk" className="pixel-btn h-14 w-14 touch-none text-xs" {...hold("act")}>
+                  ▤
+                </GameButton>
+                {hud?.scene === "room" && <><GameButton aria-label="Walk up" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("up")}>↑</GameButton><GameButton aria-label="Walk down" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("down")}>↓</GameButton></>}
+                {hud?.scene !== "room" && <GameButton aria-label="Attack" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("attack")}>✦</GameButton>}
+                <GameButton aria-label="Eat or talk" className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-xs" {...hold("act")}>
                   E
-                </button>
-                <button aria-label="Jump" className="pixel-btn h-14 w-14 touch-none text-lg" {...hold("jump")}>
+                </GameButton>
+                <GameButton aria-label="Jump" className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-lg" {...hold("jump")}>
                   ▲
-                </button>
+                </GameButton>
               </div>
             </>
           )}
