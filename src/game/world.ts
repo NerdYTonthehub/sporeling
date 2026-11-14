@@ -1,8 +1,14 @@
 // World generation: terrain, giant trees, villages, apple trees, beetles, decor.
-import { makeFlyer, type Flyer } from "./combat";
+import type { Flyer } from "./combat";
 
-export const WORLD_W = 9000;
+export const WORLD_W = 18000;
 export const GROUND_BASE = 190;
+/** The Great Lake fills everything left of LAKE_EDGE; it is far too deep to cross. */
+export const LAKE_EDGE = 820;
+export const LAKE_Y = GROUND_BASE + 12;
+/** A little pier sticks out over the water; this is as far left as you can go. */
+export const PIER_X0 = LAKE_EDGE - 70;
+export const LAKE_MIN_X = PIER_X0 + 6;
 
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -29,7 +35,7 @@ export interface Platform {
   w: number;
   color: number; // index into fungus palette
   /** shelf = fungus ledge, deck = wooden tree-top deck, bridge = sagging rope bridge from (x,y) to (x+w,y2) */
-  kind?: "shelf" | "deck" | "bridge";
+  kind?: "shelf" | "deck" | "bridge" | "pier" | "stone";
   y2?: number;
   sag?: number;
 }
@@ -85,6 +91,8 @@ export interface Npc {
   walkT: number;
   minX: number;
   maxX: number;
+  /** treetop folk are snails living in snail shells */
+  snail?: boolean;
 }
 
 export interface Village {
@@ -131,6 +139,8 @@ export interface Decor {
 }
 
 export interface World {
+  /** the pier at the lake shore */
+  pier: Platform;
   trees: GiantTree[];
   elder: GiantTree;
   flyers: Flyer[];
@@ -146,10 +156,11 @@ export interface World {
 const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, number, string[]][] }[] = [
   {
     name: "Mossbottom",
-    x: 700,
+    x: 1350,
     npcs: [
       ["Elder Morel", "#8a5a3a", false, 1.15, [
         "Welcome, little sprout. The forest is very big and you are very small.",
+        "Behind you lies the Great Lake. Nobody has ever reached the other side.",
         "Our cousins live in villages far to the east. Go and find them!",
         "Rest by our campfire whenever you feel bruised.",
       ]],
@@ -158,19 +169,19 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
         "If your belly runs empty you'll start to feel very poorly.",
       ]],
       ["Chanterelle", "#e8a33a", false, 1, [
-        "Watch out for the beetles. Jump on their shells, or puff spores at them with F!",
+        "Watch out for the beetles. Jump on their shells, or swing your wooden sword with F!",
         "The shelf fungus on the giant trunks is nice and bouncy to stand on.",
       ]],
     ],
   },
   {
     name: "Gillhollow",
-    x: 2900,
+    x: 5200,
     npcs: [
       ["Inky", "#3b3f52", false, 1, [
         "You walked all the way from Mossbottom? On those tiny legs?",
         "My grandmother says the oldest tree reaches up past the sky.",
-        "Some folks live way up in the treetops. Rope bridges link every trunk up there.",
+        "Snail folk live way up in the treetops, in big curly shells. Rope bridges link every trunk up there.",
       ]],
       ["Lady Amanita", "#c8302a", true, 1.1, [
         "Charmed, I'm sure. Do mind the moss, it's freshly combed.",
@@ -183,11 +194,11 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
   },
   {
     name: "Puffington",
-    x: 5300,
+    x: 9600,
     npcs: [
       ["Old Puff", "#efe6d2", false, 1.2, [
         "Hrrm. A traveler. We don't get many of those. Have a sit by the fire.",
-        "Keep going east and you'll find Truffle Deep, the last village before the Elder Tree.",
+        "Keep going east and you'll find Spindlewood. Past that is Truffle Deep, the last village before the Elder Tree.",
       ]],
       ["Shiitake Sam", "#7a4a2a", false, 1, [
         "I collect pebbles. This one is my favourite. It's round.",
@@ -199,8 +210,24 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
     ],
   },
   {
+    name: "Spindlewood",
+    x: 12900,
+    npcs: [
+      ["Weaver Wren", "#b8572e", true, 1, [
+        "Spindlewood! We spin rope for the treetop bridges. The snails up there are our best customers.",
+        "Those bridges are twice as high as you'd think. Don't look down!",
+      ]],
+      ["Spindle", "#efe6d2", false, 0.85, [
+        "I counted the steps from Mossbottom once. I fell asleep halfway.",
+      ]],
+      ["Burl", "#6b4a35", false, 1.15, [
+        "Truffle Deep is still a long walk east. Pack an apple or three.",
+      ]],
+    ],
+  },
+  {
     name: "Truffle Deep",
-    x: 7900,
+    x: 16200,
     npcs: [
       ["Grand Truffle", "#4a3426", false, 1.25, [
         "So. You found all of us. Not bad for such a small sprout.",
@@ -211,7 +238,7 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
         "Did you know some mushrooms glow at night? I'm working on it.",
       ]],
       ["Morsel", "#c9b38a", true, 0.85, [
-        "The Elder Tree at the very end of the forest is hollow. Beetles nest inside!",
+        "The Elder Tree at the very end of the forest is hollow. Old stone halls inside, crawling with beetles!",
         "They say whoever clears it out gets the Winged Spore. Then you could jump twice!",
       ]],
     ],
@@ -221,33 +248,34 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
 const TREE_VILLAGE_DEFS: { name: string; near: number; npcs: [string, string, boolean, number, string[]][] }[] = [
   {
     name: "Bramblebough",
-    near: 2000,
+    near: 3700,
     npcs: [
-      ["Twiglet", "#5f9a4a", true, 0.9, [
-        "You jumped all the way up here?! Nobody visits Bramblebough from below.",
+      ["Twirl", "#c98a4a", true, 0.9, [
+        "Ooh, a mushroom! You jumped all the way up here? We snails took a whole summer.",
         "Mind the rope bridges. They wobble, but they've never dropped anyone. Yet.",
       ]],
-      ["Auntie Oyster", "#cfc6b2", false, 1.1, [
-        "Up here the wind sings through the gills. Lovely, isn't it?",
+      ["Granny Whorl", "#b86a8a", false, 1.1, [
+        "Every snail carries a house on its back. Up here we just park them on the deck.",
         "Follow the bridges east and you'll reach Highcap Hollow, our sister village.",
       ]],
     ],
   },
   {
     name: "Highcap Hollow",
-    near: 6300,
+    near: 11400,
     npcs: [
-      ["Captain Chanty", "#e8a33a", false, 1.15, [
-        "Ahoy, sprout! Welcome to the highest village in the whole forest.",
+      ["Captain Slowpoke", "#e8a33a", false, 1.15, [
+        "Ahoy, sprout! Welcome to the highest snail village in the whole forest.",
         "Every trunk is tied to the next one. You could cross the whole forest without touching the ground.",
       ]],
-      ["Wisp", "#9fd6e8", true, 0.8, [
-        "I've never been to the ground. Is it nice? Is it soft?",
+      ["Pearl", "#9fd6e8", true, 0.8, [
+        "I've never been to the ground. Is it nice? Is it slimy?",
       ]],
     ],
   },
 ];
 
+const SHELLS = ["#c98a4a", "#b86a8a", "#d9b46a", "#8a6a9a", "#c76a4a"];
 const CAPS = ["#d9443a", "#c8302a", "#e8a33a", "#8a5a3a", "#efe6d2", "#3e7fb8", "#b8572e", "#6b4a35"];
 
 export function generateWorld(seed = 1337): { world: World; groundY: (x: number) => number } {
@@ -255,6 +283,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   const rr = (a: number, b: number) => a + rnd() * (b - a);
 
   const villageSpans = VILLAGE_DEFS.map((v) => ({ x: v.x, half: 150 }));
+  const nearLake = (x: number, pad = 0) => x < LAKE_EDGE + 120 + pad;
   // The Elder Tree (the dungeon) always stands furthest to the right.
   const ELDER_W = 170;
   const ELDER_X = WORLD_W - 480;
@@ -263,8 +292,8 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
 
   // Fishing puddles (decided first so the ground can be flattened around them)
   const puddles: Puddle[] = [];
-  for (let px = 450; px < WORLD_W - 200; ) {
-    if (!inVillage(px, 90) && !inElder(px, 40)) {
+  for (let px = LAKE_EDGE + 400; px < WORLD_W - 200; ) {
+    if (!inVillage(px, 90) && !inElder(px, 40) && !nearLake(px, 60)) {
       puddles.push({ x: Math.round(px), half: Math.round(rr(13, 20)) });
       px += rr(550, 950);
     } else px += 50;
@@ -275,7 +304,14 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
     GROUND_BASE + Math.sin(x / 190) * 9 + Math.sin(x / 71 + 1.3) * 4 + Math.sin(x / 523 + 4) * 12;
 
   const groundY = (x: number) => {
+    // the Great Lake: flat water surface, then a sandy shore rising out of it
+    if (x < LAKE_EDGE) return LAKE_Y;
     let g = rawGround(x);
+    if (x < LAKE_EDGE + 70) {
+      const t = (x - LAKE_EDGE) / 70;
+      const sm = t * t * (3 - 2 * t);
+      g = LAKE_Y * (1 - sm) + g * sm;
+    }
     for (const v of villageSpans) {
       const d = Math.abs(x - v.x);
       const flatY = rawGround(v.x);
@@ -301,7 +337,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   // Giant trees (positions first; climbing shelves + decks come after the tree villages are chosen)
   const trees: GiantTree[] = [];
   const platforms: Platform[] = [];
-  let x = 260;
+  let x = LAKE_EDGE + 260;
   while (x < ELDER_X - 300) {
     const w = Math.round(rr(70, 130));
     if (!inVillage(x + w / 2, w / 2 + 20) && !puddles.some((pd) => x + w + 45 > pd.x - pd.half && x - 45 < pd.x + pd.half)) {
@@ -325,7 +361,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   for (const t of trees) {
     const cx = t.x + t.w / 2;
     const g = groundY(cx);
-    const deckY = Math.round(g - rr(212, 236));
+    const deckY = Math.round(g - rr(424, 472));
     const pad = villageTrees.has(t) ? 75 : t.elder ? 30 : 22;
     t.deckY = deckY;
     t.deckX0 = Math.round(t.x - pad);
@@ -350,14 +386,14 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
     const b = trees[i + 1]!;
     const w = b.deckX0 - a.deckX1;
     if (w < 10) continue;
-    platforms.push({ x: a.deckX1, y: a.deckY, w, y2: b.deckY, sag: Math.min(34, Math.round(w * 0.07)), color: 0, kind: "bridge" });
+    platforms.push({ x: a.deckX1, y: a.deckY, w, y2: b.deckY, sag: Math.min(40, Math.round(w * 0.07)), color: 0, kind: "bridge" });
   }
 
   // Apple trees
   const appleTrees: AppleTree[] = [];
-  x = 380;
+  x = LAKE_EDGE + 140;
   while (x < WORLD_W - 100) {
-    if (!inVillage(x, 30) && !nearPuddle(x, 22) && !trees.some((t) => x > t.x - 30 && x < t.x + t.w + 30)) {
+    if (!inVillage(x, 30) && !inElder(x, 10) && !nearPuddle(x, 22) && !trees.some((t) => x > t.x - 30 && x < t.x + t.w + 30)) {
       const size = rr(0.85, 1.2);
       const apples = [];
       const n = 3 + Math.floor(rnd() * 3);
@@ -429,8 +465,9 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
         stemH: Math.round(rr(22, 30)),
         capW: Math.round(stemW + rr(16, 22)),
         capH: Math.round(rr(11, 14)),
-        cap: CAPS[Math.floor(rnd() * CAPS.length)] ?? "#d9443a",
+        cap: SHELLS[Math.floor(rnd() * SHELLS.length)] ?? "#c98a4a",
         spots: rnd() < 0.5,
+        shell: true,
       };
     });
     villages.push({
@@ -455,6 +492,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
         walkT: 0,
         minX: cxT - half + 12,
         maxX: cxT + half - 12,
+        snail: true,
       })),
       discovered: false,
       floorY: t.deckY,
@@ -463,7 +501,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
 
   // Beetles: patrol between villages
   const beetles: Beetle[] = [];
-  x = 1100;
+  x = LAKE_EDGE + 1100;
   while (x < ELDER_X - 120) {
     if (!inVillage(x, 120) && !nearPuddle(x, 190)) {
       const range = rr(50, 110);
@@ -481,15 +519,8 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
     } else x += 60;
   }
 
-  // Flying beetles hover over the eastern half of the forest
+  // Flying beetles only live inside the Elder Tree dungeon.
   const flyers: Flyer[] = [];
-  x = 1700;
-  while (x < ELDER_X - 200) {
-    if (!inVillage(x, 160)) {
-      flyers.push(makeFlyer(Math.round(x), Math.round(groundY(x) - rr(48, 62)), Math.round(rr(30, 60))));
-      x += rr(900, 1300);
-    } else x += 80;
-  }
 
   // Ground decor
   const decor: Decor[] = [];
@@ -499,14 +530,17 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
       r < 0.6 ? "grass" : r < 0.7 ? "flower" : r < 0.78 ? "clover" : r < 0.86 ? "pebble" : r < 0.92 ? "leaf" : "fern";
     const v = rnd();
     const c = Math.floor(rnd() * 4);
-    if (!nearPuddle(dx, 2)) decor.push({ x: dx, kind, v, c });
+    if (!nearPuddle(dx, 2) && dx > LAKE_EDGE + 4) decor.push({ x: dx, kind, v, c });
   }
   const fgGrass: Decor[] = [];
   for (let dx = 0; dx < WORLD_W; dx += 30 + Math.floor(rnd() * 90)) {
     const v = rnd();
     const c = Math.floor(rnd() * 3);
-    if (!nearPuddle(dx, 4)) fgGrass.push({ x: dx, kind: "grass", v, c });
+    if (!nearPuddle(dx, 4) && dx > LAKE_EDGE + 20) fgGrass.push({ x: dx, kind: "grass", v, c });
   }
 
-  return { world: { trees, elder, flyers, platforms, appleTrees, puddles, villages, beetles, decor, fgGrass }, groundY };
+  const pier: Platform = { x: PIER_X0, y: LAKE_Y - 8, w: LAKE_EDGE + 40 - PIER_X0, color: 0, kind: "pier" };
+  platforms.push(pier);
+
+  return { world: { pier, trees, elder, flyers, platforms, appleTrees, puddles, villages, beetles, decor, fgGrass }, groundY };
 }
