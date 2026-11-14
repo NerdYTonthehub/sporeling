@@ -1,16 +1,18 @@
 // Combat + movement rules: attacks, enemy damage, flying beetle AI and the double jump.
 // Pure (no DOM) so they can be tested in isolation.
 
-/** Seconds the spore puff attack stays active, and the wait before the next one. */
-export const ATTACK_TIME = 0.22;
-export const ATTACK_COOLDOWN = 0.38;
-/** How far in front of the mushroom the puff reaches (px). */
-export const ATTACK_REACH = 20;
+/** Seconds the wooden sword sweep stays active, and the wait before the next one. */
+export const ATTACK_TIME = 0.24;
+export const ATTACK_COOLDOWN = 0.4;
+/** How far in front of the mushroom the sword reaches (px). */
+export const ATTACK_REACH = 19;
 
 export const BEETLE_DAMAGE = 15;
 export const FLYER_DAMAGE = 12;
 export const BOSS_DAMAGE = 20;
-export const BOSS_HP = 6;
+export const BOSS_HP = 8;
+/** Flying beetles take this many hits (sword or stomp) to defeat. */
+export const FLYER_HP = 2;
 
 /** Ground jump + one extra jump in the air once the double jump is unlocked. */
 export const jumpsAllowed = (hasDoubleJump: boolean) => (hasDoubleJump ? 2 : 1);
@@ -44,7 +46,23 @@ export interface Flyer {
   flap: number;
   alive: boolean;
   respawn: number;
+  hp: number;
+  /** brief flash after being hit */
+  hitT: number;
   section?: number | undefined;
+}
+
+/** Hit a flying beetle once. Returns true when that hit defeated it. Ignored while it is still flashing. */
+export function damageFlyer(f: Flyer): boolean {
+  if (!f.alive || f.hitT > 0) return false;
+  f.hp -= 1;
+  if (f.hp > 0) {
+    f.hitT = 0.35;
+    f.state = "rise";
+    return false;
+  }
+  f.alive = false;
+  return true;
 }
 
 /** How close (horizontally) the player must be before a flying beetle swoops. */
@@ -52,12 +70,13 @@ export const FLYER_SIGHT = 80;
 export const DIVE_SPEED = 105;
 
 export function makeFlyer(x: number, baseY: number, range: number, section?: number): Flyer {
-  return { x, y: baseY, baseY, homeX: x, range, vx: 18, vy: 0, state: "hover", t: 0, cd: 1 + (x % 7) * 0.2, flap: x % 5, alive: true, respawn: 0, section };
+  return { x, y: baseY, baseY, homeX: x, range, vx: 18, vy: 0, state: "hover", t: 0, cd: 1 + (x % 7) * 0.2, flap: x % 5, alive: true, respawn: 0, hp: FLYER_HP, hitT: 0, section };
 }
 
 /** Advance one flying beetle. (tx, ty) = player's feet, floorY = ground below the beetle. */
 export function stepFlyer(f: Flyer, dt: number, tx: number, ty: number, floorY: number) {
   f.flap += dt;
+  f.hitT = Math.max(0, f.hitT - dt);
   f.cd -= dt;
   if (f.state === "hover") {
     f.x += f.vx * dt;
