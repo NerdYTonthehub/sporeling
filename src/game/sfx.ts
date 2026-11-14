@@ -16,6 +16,11 @@ export function initAudio() {
   }
 }
 
+/** Shared AudioContext (null until the first user gesture calls initAudio). */
+export function getAudioContext() {
+  return ac;
+}
+
 export function setMuted(m: boolean) {
   muted = m;
 }

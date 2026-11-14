@@ -47,6 +47,10 @@ export interface Room {
   rug: string;
   books: string[];
   lore: string;
+  textureSeed?: number;
+  shellRose?: string;
+  shellAmber?: string;
+  background?: HTMLCanvasElement;
 }
 
 const BLANKETS = ["#c8473a", "#3e7fb8", "#5f9a4a", "#e0a33a", "#8a5a9a", "#d9708a"];
@@ -100,9 +104,12 @@ export function createRoom(house: House, village: string, seed: number): Room {
     house,
     village,
     furn: items,
-    floorA: "#8a6342",
-    floorB: "#7a5536",
-    wall: "#eadcbf",
+    textureSeed: seed,
+    shellRose: "#c99587",
+    shellAmber: "#b58650",
+    floorA: house.shell ? "#ba915e" : "#8a6342",
+    floorB: house.shell ? "#aa7c4f" : "#7a5536",
+    wall: house.shell ? "#efddcb" : "#eadcbf",
     blanket: BLANKETS[Math.floor(rnd() * BLANKETS.length)] ?? "#c8473a",
     rug: RUGS[Math.floor(rnd() * RUGS.length)] ?? "#9a3b2e",
     books,
@@ -156,13 +163,31 @@ export const atDoor = (x: number, y: number) => y > FLOOR_BOTTOM - 6 && x > DOOR
 // ---------------- drawing ----------------
 
 function drawFloor(ctx: Ctx, room: Room, ox: number, oy: number) {
-  for (let y = WALL_TOP; y < FLOOR_BOTTOM + 4; y += 6) {
-    const row = (y - WALL_TOP) / 6;
-    rect(ctx, row % 2 ? room.floorA : room.floorB, ox, oy + y, ROOM_W, 6);
-    rect(ctx, "#5a3c26", ox, oy + y + 5, ROOM_W, 1);
-    const off = (row * 37) % 40;
-    for (let x = off; x < ROOM_W; x += 40) rect(ctx, "#5a3c26", ox + x, oy + y, 1, 5);
-    for (let x = (off + 13) % 40; x < ROOM_W; x += 40) rect(ctx, shade(room.floorA, 1.12), ox + x, oy + y + 2, 3, 1);
+  const rnd = mulberry32((room.textureSeed ?? 0) ^ 0x51ed);
+  const shell = room.house.shell;
+  const step = shell ? 10 : 6;
+  for (let y = WALL_TOP; y < FLOOR_BOTTOM + 4; y += step) {
+    const row = (y - WALL_TOP) / step;
+    for (let x = -40 + (row * 17) % 40; x < ROOM_W; x += 40) {
+      const left = Math.max(0, x), right = Math.min(ROOM_W, x + 40);
+      const tone = (Math.floor(rnd() * 5) - 2) * 0.04 + 1;
+      const base = row % 2 ? room.floorA : room.floorB;
+      rect(ctx, shade(base, tone), ox + left, oy + y, right - left, step);
+      rect(ctx, shade(base, 0.66), ox + left, oy + y + step - 1, right - left, 1);
+      rect(ctx, shade(base, 0.7), ox + left, oy + y, 1, step - 1);
+      if (shell) {
+        rect(ctx, shade(base, 1.18), ox + left + 2, oy + y + 1, Math.max(0, right - left - 4), 1);
+        rect(ctx, shade(base, 1.1), ox + left + 4, oy + y + 2, Math.max(0, right - left - 12), 1);
+      } else {
+        for (let i = 0; i < 3; i++) {
+          const gx = left + 3 + Math.floor(rnd() * Math.max(1, right - left - 12));
+          rect(ctx, shade(base, i === 1 ? 1.14 : 0.85), ox + gx, oy + y + 1 + i,
+            Math.max(0, Math.min(5 + Math.floor(rnd() * 8), right - gx - 1)), 1);
+        }
+        for (const nx of [left + 2, right - 3]) rect(ctx, "#493425", ox + nx, oy + y + 2, 1, 1);
+        if (rnd() < 0.22) rect(ctx, shade(base, 1.18), ox + left + 4, oy + y + 3, Math.min(8, right - left - 4), 1);
+      }
+    }
   }
 }
 
@@ -171,6 +196,33 @@ function drawWalls(ctx: Ctx, room: Room, ox: number, oy: number, night: number) 
   rect(ctx, room.wall, ox, oy, ROOM_W, WALL_TOP);
   rect(ctx, shade(room.wall, 0.86), ox, oy, ROOM_W, 3);
   for (let x = 10; x < ROOM_W; x += 22) rect(ctx, shade(room.wall, 0.93), ox + x, oy + 3, 1, WALL_TOP - 12);
+  const rose = room.shellRose ?? "#c99587";
+  const amber = room.shellAmber ?? "#b58650";
+  const rnd = mulberry32((room.textureSeed ?? 0) ^ 0x73aa);
+  for (let x = 9; x < ROOM_W - 8; x += 3) {
+    const y = 4 + Math.floor(rnd() * 9);
+    rect(ctx, shade(room.wall, 0.94), ox + x, oy + y, 1, 3 + Math.floor(rnd() * 6));
+    if (rnd() < 0.4) rect(ctx, shade(room.wall, 0.84), ox + x + 1, oy + 18, 1, 1);
+  }
+  if (room.house.shell) {
+    // Two visible whorls flank the window rather than hiding behind it.
+    for (const cx of [68, 135]) for (let i = 0; i < 170; i++) {
+      const a = i * 0.075, r = i * 0.057;
+      const x = Math.round(cx + Math.cos(a) * r);
+      const y = Math.round(13 + Math.sin(a) * r * 0.8);
+      rect(ctx, rose, ox + x, oy + y, 1, 1);
+      rect(ctx, "#f7e9d6", ox + x, oy + y - 1, 1, 1);
+    }
+  } else {
+    for (let x = 10; x < ROOM_W - 8; x += 12) {
+      rect(ctx, "#b9ac87", ox + x, oy + 19, 3, 1);
+      rect(ctx, "#b9ac87", ox + x + 1, oy + 18, 1, 3);
+    }
+  }
+  // Crown molding and its shadow.
+  rect(ctx, "#3a281c", ox + SIDE, oy + 2, ROOM_W - SIDE * 2, 3);
+  rect(ctx, room.house.shell ? amber : "#8a6342", ox + SIDE, oy, ROOM_W - SIDE * 2, 3);
+  for (let x = 10; x < ROOM_W - 10; x += 13) rect(ctx, "#b28a5e", ox + x, oy + 1, 7, 1);
   // wainscot
   rect(ctx, "#6b4a30", ox, oy + WALL_TOP - 9, ROOM_W, 9);
   rect(ctx, "#8a6342", ox, oy + WALL_TOP - 9, ROOM_W, 1);
@@ -187,6 +239,25 @@ function drawWalls(ctx: Ctx, room: Room, ox: number, oy: number, night: number) 
   rect(ctx, shade(room.wall, 0.78), ox + DOOR_X1, by, ROOM_W - DOOR_X1, ROOM_H - FLOOR_BOTTOM - 2);
   rect(ctx, "#1b140f", ox + SIDE, by - 1, DOOR_X0 - SIDE, 1);
   rect(ctx, "#1b140f", ox + DOOR_X1, by - 1, ROOM_W - DOOR_X1 - SIDE, 1);
+  // Timber courses, or curved nacre growth bands, on the cutaway walls.
+  for (let y = 5; y < ROOM_H; y += 7) {
+    for (const sx of [0, ROOM_W - SIDE]) {
+      if (room.house.shell) {
+        for (let k = 0; k < SIDE; k++) {
+          const bend = Math.round(Math.sin(k * 0.5 + y * 0.04) * 2);
+          rect(ctx, (y % 14) ? rose : amber, ox + sx + k, oy + y + bend, 1, 2);
+        }
+      } else {
+        rect(ctx, "#594532", ox + sx, oy + y, SIDE, 1);
+        rect(ctx, "#b09772", ox + sx + 1, oy + y + 2, 4, 1);
+      }
+    }
+  }
+  for (let x = 8; x < ROOM_W - 8; x += 11) {
+    if (x + 7 >= DOOR_X0 && x < DOOR_X1) continue;
+    rect(ctx, room.house.shell ? rose : "#594532", ox + x, by + 1, 1, 6);
+    rect(ctx, room.house.shell ? "#f1d7b9" : "#b09772", ox + x + 2, by + 3, 5, 1);
+  }
   // doorway: outside light
   const out = night > 0.5 ? "#1c2a3a" : "#7fae7a";
   rect(ctx, out, ox + DOOR_X0, by, DOOR_X1 - DOOR_X0, ROOM_H - FLOOR_BOTTOM - 2);
@@ -194,9 +265,11 @@ function drawWalls(ctx: Ctx, room: Room, ox: number, oy: number, night: number) 
   rect(ctx, "#a8784a", ox + DOOR_X0 + 3, oy + FLOOR_BOTTOM - 7, DOOR_X1 - DOOR_X0 - 6, 7);
   for (let x = DOOR_X0 + 5; x < DOOR_X1 - 4; x += 3) rect(ctx, "#8a5a32", ox + x, oy + FLOOR_BOTTOM - 6, 1, 5);
   // outline
-  ctx.strokeStyle = "#1b140f";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(ox - 0.5, oy - 0.5, ROOM_W + 1, ROOM_H + 1);
+  rect(ctx, "#1b140f", ox, oy, ROOM_W, 1);
+  rect(ctx, "#1b140f", ox, oy, 1, ROOM_H);
+  rect(ctx, "#1b140f", ox + ROOM_W - 1, oy, 1, ROOM_H);
+  rect(ctx, "#1b140f", ox, oy + ROOM_H - 1, DOOR_X0, 1);
+  rect(ctx, "#1b140f", ox + DOOR_X1, oy + ROOM_H - 1, ROOM_W - DOOR_X1, 1);
 }
 
 function drawRug(ctx: Ctx, room: Room, f: Furn, ox: number, oy: number) {
@@ -210,6 +283,13 @@ function drawRug(ctx: Ctx, room: Room, f: Furn, ox: number, oy: number) {
     if (w > 3) rect(ctx, room.rug, cx - w + 2, cy + dy, w * 2 - 4, 1);
     if (w > 9 && Math.abs(dy) < ry - 4) rect(ctx, shade(room.rug, 1.3), cx - w + 6, cy + dy, 1, 1), rect(ctx, shade(room.rug, 1.3), cx + w - 7, cy + dy, 1, 1);
   }
+  for (let dy = -15; dy <= 15; dy += 5) {
+    const w = Math.round(rx * Math.sqrt(1 - (dy / ry) ** 2));
+    for (const side of [-1, 1]) {
+      rect(ctx, "#c6ab7c", cx + side * w - (side < 0 ? 3 : 0), cy + dy, 4, 1);
+      rect(ctx, "#ddbd81", cx + side * (w - 4), cy + dy, 2, 2);
+    }
+  }
   for (let i = -3; i <= 3; i++) rect(ctx, "#f2c84b", cx + i * 6, cy, 2, 1);
 }
 
@@ -222,6 +302,11 @@ function drawFireplace(ctx: Ctx, f: Furn, ox: number, oy: number, t: number) {
     for (let c = (r / 5) % 2 ? 0 : 4; c < f.w; c += 8) rect(ctx, "#5e5a52", x + c, y + r, 1, 5);
     rect(ctx, "#5e5a52", x, y + r + 4, f.w, 1);
   }
+  for (let sy = 0; sy < f.h; sy += 5) for (let sx = 1; sx < f.w - 2; sx += 8) {
+    rect(ctx, (sx + sy) % 3 ? "#969083" : "#706c62", x + sx, y + sy + 1, Math.min(6, f.w - sx), 2);
+    rect(ctx, "#aaa18d", x + sx, y + sy, Math.min(4, f.w - sx), 1);
+  }
+  rect(ctx, "#49423b", x + 6, y + 9, f.w - 12, 3);
   rect(ctx, "#8a6342", x - 3, y + 4, f.w + 6, 3);
   rect(ctx, "#5a3c26", x - 3, y + 7, f.w + 6, 1);
   rect(ctx, "#f2efe0", x + 4, y + 1, 2, 3);
@@ -266,6 +351,9 @@ function drawBookshelf(ctx: Ctx, room: Room, f: Furn, ox: number, oy: number) {
       }
     }
     rect(ctx, "#8a6342", x + 1, sy + 7, f.w - 2, 1);
+    for (let gx = 3; gx < f.w - 5; gx += 9) rect(ctx, "#af8250", x + gx, sy + 7, 5, 1);
+    rect(ctx, "#a87a4c", x, sy, 1, 6);
+    rect(ctx, "#493321", x + f.w - 2, sy, 1, 6);
   }
 }
 
@@ -307,8 +395,16 @@ function drawBed(ctx: Ctx, room: Room, f: Furn, ox: number, oy: number) {
   rect(ctx, room.blanket, x + 1, y + 15, f.w - 2, f.h - 15);
   rect(ctx, shade(room.blanket, 1.25), x + 1, y + 15, f.w - 2, 2);
   rect(ctx, shade(room.blanket, 0.75), x + f.w - 4, y + 17, 3, f.h - 17);
-  for (let yy = y + 20; yy < y + f.h - 2; yy += 5) {
-    for (let xx = x + 4 + ((yy - y) % 10 ? 2 : 0); xx < x + f.w - 4; xx += 5) rect(ctx, shade(room.blanket, 1.3), xx, yy, 1, 1);
+  for (let yy = 18; yy < f.h - 2; yy += 6) {
+    for (let xx = 3; xx < f.w - 4; xx += 6) {
+      const even = ((xx - 3 + yy - 18) / 6) % 2 === 0;
+      rect(ctx, shade(room.blanket, even ? 1.18 : 0.82), x + xx, y + yy, 5, Math.min(5, f.h - yy - 1));
+      rect(ctx, "#d7be94", x + xx + 2, y + yy + 2, 1, 1);
+    }
+  }
+  for (let gx = 3; gx < f.w - 3; gx += 7) {
+    rect(ctx, "#ab7e4e", x + gx, y + 3, 4, 1);
+    rect(ctx, "#483220", x + gx + 1, y + 5, 3, 1);
   }
   rect(ctx, "#6b4a30", x, y + f.h, f.w, 2);
 }
@@ -330,6 +426,10 @@ function drawTable(ctx: Ctx, f: Furn, ox: number, oy: number) {
     rect(ctx, dy < 4 ? "#a87a4c" : "#8a6342", cx - w, top + dy, w * 2, 1);
   }
   rect(ctx, "#6b4a30", cx - f.w / 2 + 2, top + 12, f.w - 4, 2);
+  for (let gy = 3; gy < 12; gy += 3) {
+    rect(ctx, "#6b4a30", cx - 9, top + gy, 18, 1);
+    rect(ctx, "#ad8052", cx - 7 + gy % 4, top + gy + 1, 8, 1);
+  }
   // mug + plate with an apple
   rect(ctx, "#f2efe0", cx - 8, top + 4, 8, 4);
   rect(ctx, "#d7362a", cx - 6, top + 3, 3, 3);
@@ -398,6 +498,46 @@ function drawLamp(ctx: Ctx, f: Furn, ox: number, oy: number) {
   rect(ctx, "#fff1a8", x + 1, y + 1, 3, 1);
 }
 
+/** Static texture work is paid only once per room, never once per frame. */
+function drawBackground(ctx: Ctx, room: Room, ox: number, oy: number) {
+  drawFloor(ctx, room, ox, oy);
+  drawWalls(ctx, room, ox, oy, 0);
+  for (const f of room.furn) if (f.kind === "rug") drawRug(ctx, room, f, ox, oy);
+  // Stepped translucent bands preserve the pixel grid and doorway clearance.
+  ctx.save();
+  for (let i = 0; i < 4; i++) {
+    ctx.globalAlpha = 0.045;
+    rect(ctx, "#1b140f", ox + SIDE + i * 2, oy + WALL_TOP, 2, FLOOR_BOTTOM - WALL_TOP);
+    rect(ctx, "#1b140f", ox + ROOM_W - SIDE - 2 - i * 2, oy + WALL_TOP, 2, FLOOR_BOTTOM - WALL_TOP);
+    rect(ctx, "#1b140f", ox + SIDE, oy + WALL_TOP + i * 2, ROOM_W - SIDE * 2, 2);
+    for (const x of [SIDE, DOOR_X1]) rect(ctx, "#1b140f", ox + x, oy + FLOOR_BOTTOM - 2 - i * 2,
+      x === SIDE ? DOOR_X0 - SIDE : ROOM_W - SIDE - DOOR_X1, 2);
+  }
+  for (const f of room.furn) {
+    if (!f.box || f.kind === "window") continue;
+    ctx.globalAlpha = 0.10;
+    const y = Math.max(WALL_TOP + 1, f.y + f.h - 3);
+    rect(ctx, "#1b140f", ox + f.x - 3, oy + y, f.w + 6, 5);
+    ctx.globalAlpha = 0.16;
+    rect(ctx, "#1b140f", ox + f.x - 1, oy + y + 1, f.w + 2, 2);
+  }
+  ctx.restore();
+  // Dried herbs between the furniture and the window.
+  rect(ctx, "#795335", ox + 58, oy + 6, 1, 6);
+  rect(ctx, "#ab8854", ox + 56, oy + 10, 5, 1);
+  for (let i = 0; i < 5; i++) {
+    rect(ctx, i % 2 ? "#6b7542" : "#4c6036", ox + 56 + i, oy + 11 + i % 2, 1, 5 - Math.abs(2 - i));
+  }
+  // Miniature framed mushroom study.
+  rect(ctx, "#1b140f", ox + 140, oy + 8, 9, 12);
+  rect(ctx, "#9c7148", ox + 141, oy + 9, 7, 10);
+  rect(ctx, "#d8c8a5", ox + 142, oy + 10, 5, 8);
+  rect(ctx, "#806d44", ox + 144, oy + 13, 1, 4);
+  rect(ctx, "#aa5943", ox + 142, oy + 12, 5, 2);
+  rect(ctx, "#aa5943", ox + 143, oy + 11, 3, 1);
+  for (const f of room.furn) if (f.kind === "bookshelf") drawBookshelf(ctx, room, f, ox, oy);
+}
+
 export interface RoomPlayer {
   x: number;
   y: number;
@@ -413,12 +553,22 @@ export function drawRoom(ctx: Ctx, room: Room, W: number, H: number, pl: RoomPla
   ctx.fillStyle = "#120c08";
   ctx.fillRect(0, 0, W, H);
   rect(ctx, "#1d140e", ox - 8, oy - 8, ROOM_W + 16, ROOM_H + 16);
-  drawFloor(ctx, room, ox, oy);
-  drawWalls(ctx, room, ox, oy, night);
-  for (const f of room.furn) if (f.kind === "rug") drawRug(ctx, room, f, ox, oy);
+  if (!room.background && typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = ROOM_W;
+    canvas.height = ROOM_H;
+    const bg = canvas.getContext("2d");
+    if (bg) {
+      drawBackground(bg, room, 0, 0);
+      room.background = canvas;
+    }
+  }
+  if (room.background) ctx.drawImage(room.background, ox, oy);
+  else drawBackground(ctx, room, ox, oy);
+  rect(ctx, night > 0.5 ? "#1c2a3a" : "#7fae7a", ox + DOOR_X0,
+    oy + FLOOR_BOTTOM + 2, DOOR_X1 - DOOR_X0, ROOM_H - FLOOR_BOTTOM - 2);
   for (const f of room.furn) {
     if (f.kind === "fireplace") drawFireplace(ctx, f, ox, oy, t);
-    if (f.kind === "bookshelf") drawBookshelf(ctx, room, f, ox, oy);
     if (f.kind === "window") drawWindow(ctx, room, f, ox, oy, night);
   }
   // y-sorted furniture + player
