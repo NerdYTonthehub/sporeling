@@ -66,6 +66,8 @@ export interface House {
   capH: number;
   cap: string;
   spots: boolean;
+  /** Treetop homes are giant snail shells instead of mushroom houses. */
+  shell?: boolean;
 }
 
 export interface Npc {
