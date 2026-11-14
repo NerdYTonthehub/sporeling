@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOSS_HP, attackHits, jumpsAllowed, makeFlyer, sectionCleared, stepFlyer } from "./combat";
+import { BOSS_HP, attackHits, damageFlyer, jumpsAllowed, makeFlyer, sectionCleared, stepFlyer } from "./combat";
 
 describe("double jump", () => {
   it("only one jump until the dungeon is cleared, two after", () => {
@@ -19,8 +19,8 @@ describe("attacks", () => {
     expect(attackHits(100, 190, 1, 108, 120)).toBe(false);
   });
 
-  it("the beetle king takes 6 hits", () => {
-    expect(BOSS_HP).toBe(6);
+  it("the beetle king takes 8 hits", () => {
+    expect(BOSS_HP).toBe(8);
   });
 });
 
@@ -45,6 +45,15 @@ describe("flying beetles", () => {
     stepFlyer(f, 0.016, 120, 190, 190);
     expect(f.state).toBe("dive");
     expect(f.vy).toBeGreaterThan(0);
+  });
+
+  it("survive the first hit and die on the second", () => {
+    const f = makeFlyer(100, 120, 40);
+    expect(damageFlyer(f)).toBe(false);
+    expect(f.alive).toBe(true);
+    f.hitT = 0;
+    expect(damageFlyer(f)).toBe(true);
+    expect(f.alive).toBe(false);
   });
 
   it("ignore a player far away", () => {
