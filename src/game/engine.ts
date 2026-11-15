@@ -1,25 +1,31 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
-import { appleTreeGeom, drawAppleTree, drawBeetle, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, fillCircle, rect } from "./sprites";
+import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
 import { FISH, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
 import { sfx } from "./sfx";
 import { eatApple, eatGlowcap, isDead, nap, takeDamage, tickVitals, type Vitals } from "./vitals";
-import { ATTACK_COOLDOWN, ATTACK_REACH, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
+import { ATTACK_COOLDOWN, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, damageFlyer, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
 import {
-  DUNGEON_CEIL,
-  DUNGEON_FLOOR,
+  PIT_Y,
+  ceilAt,
   createDungeon,
   drawDoorway,
   drawDungeonBack,
   drawDungeonFloor,
+  drawDungeonLights,
   drawGate,
   drawGlowcap,
   drawShrine,
-  dungeonFloorY,
+  floorAt,
   type Dungeon,
 } from "./dungeon";
+import { SAVE_VERSION, type SaveData } from "./save";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, drawRoom, moveInRoom, nearbyFurn, type Room, type RoomPlayer } from "./interior";
 import {
   GROUND_BASE,
+  LAKE_EDGE,
+  LAKE_MIN_X,
+  LAKE_Y,
+  PIER_X0,
   WORLD_W,
   generateWorld,
   hash1,
@@ -43,12 +49,13 @@ const GRAVITY = 640;
 const JUMP_V = 220;
 const APPLE_REGROW = 25;
 const DAY_LENGTH = 240;
-const START_X = 230;
+const START_X = 960;
 const RELEASE_TIME = 3.6;
 const ROOM_SPEED = 46;
 const FADE = 0.5;
-/** Boss arena starts past the second root gate. */
-const BOSS_ARENA_X = 1100;
+/** Damage for falling into the dungeon's spike pit. */
+const PIT_DAMAGE = 15;
+const SHOCKWAVE_DAMAGE = 14;
 
 export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
 export type Scene = "forest" | "dungeon" | "room";
@@ -59,6 +66,13 @@ interface Level {
   platforms: Platform[];
   beetles: Beetle[];
   flyers: Flyer[];
+  ceil?: Int16Array;
+}
+
+interface Shockwave {
+  x: number;
+  dir: number;
+  t: number;
 }
 
 export interface HudState {
@@ -178,6 +192,8 @@ export class Game {
   private swingHits = new Set<object>();
   private paused = false;
   private fade: { t: number; action: (() => void) | null } | null = null;
+  private shockwaves: Shockwave[] = [];
+  private lakeHintT = 0;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -238,6 +254,7 @@ export class Game {
     this.attackT = 0;
     this.attackCd = 0;
     this.fade = null;
+    this.shockwaves = [];
     this.paused = false;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
