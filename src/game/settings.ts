@@ -9,7 +9,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "down", label: "Down · drop / walk down indoors" },
   { id: "jump", label: "Jump · reel in a fish" },
   { id: "act", label: "Use · eat, talk, fish, enter" },
-  { id: "attack", label: "Attack · spore puff" },
+  { id: "attack", label: "Attack · swing wooden sword" },
   { id: "bag", label: "Open fish bag" },
 ];
 
@@ -31,11 +31,13 @@ export const RESERVED_KEYS = ["Escape"];
 
 export interface Settings {
   sound: boolean;
+  /** background music (cozy forest / scary dungeon) */
+  music: boolean;
   volume: number; // 0..1
   keys: KeyBinds;
 }
 
-export const DEFAULT_SETTINGS: Settings = { sound: true, volume: 0.8, keys: DEFAULT_KEYS };
+export const DEFAULT_SETTINGS: Settings = { sound: true, music: true, volume: 0.8, keys: DEFAULT_KEYS };
 
 export const SETTINGS_STORAGE_KEY = "sporeling-settings";
 
@@ -95,6 +97,7 @@ export function parseSettings(raw: string | null): Settings {
     }
     return {
       sound: typeof o.sound === "boolean" ? o.sound : DEFAULT_SETTINGS.sound,
+      music: typeof o.music === "boolean" ? o.music : DEFAULT_SETTINGS.music,
       volume: typeof o.volume === "number" ? Math.max(0, Math.min(1, o.volume)) : DEFAULT_SETTINGS.volume,
       keys,
     };
