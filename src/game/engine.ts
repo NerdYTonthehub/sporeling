@@ -664,6 +664,7 @@ export class Game {
     if (this.scene === "forest") this.updateNpcs(dt);
     this.updateBeetles(dt, active);
     this.updateFlyers(dt, active);
+    this.updateShockwaves(dt, active && this.mode !== "releasing" && !this.fade);
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
     if (active && this.attackT > 0) this.resolveAttack();
@@ -895,18 +896,15 @@ export class Game {
     this.attackT = ATTACK_TIME;
     this.attackCd = ATTACK_COOLDOWN;
     this.swingHits = new Set();
-    sfx.puff();
-    const f = p.facing >= 0 ? 1 : -1;
-    for (let i = 0; i < 10; i++) {
-      this.spawn({ x: p.x + f * 6, y: p.y - 10 + (Math.random() - 0.5) * 8, vx: f * (60 + Math.random() * 90), vy: (Math.random() - 0.5) * 30, life: 0.2 + Math.random() * 0.15, color: i % 3 ? "#efe8c4" : "#b8d870", size: i % 2 ? 2 : 1, grav: -20, kind: "bit" });
-    }
+    sfx.swing();
+    void p;
   }
 
   private resolveAttack() {
     const p = this.p;
     for (const b of this.lvl.beetles) {
       if (!b.alive || this.swingHits.has(b)) continue;
-      if (attackHits(p.x, p.y, p.facing, b.x, b.y - (b.big ? 8 : 4), b.big ? 12 : 5, b.big ? 8 : 5)) {
+      if (attackHits(p.x, p.y, p.facing, b.big ? b.x + 4 * (Math.sign(b.vx) || 1) : b.x, b.y - (b.big ? 16 : 4), b.big ? 20 : 5, b.big ? 16 : 5)) {
         this.swingHits.add(b);
         this.hitBeetle(b);
       }
@@ -915,7 +913,7 @@ export class Game {
       if (!f.alive || this.swingHits.has(f)) continue;
       if (attackHits(p.x, p.y, p.facing, f.x, f.y)) {
         this.swingHits.add(f);
-        this.killFlyer(f);
+        this.hitFlyer(f);
       }
     }
   }
@@ -950,11 +948,18 @@ export class Game {
     }
   }
 
-  private killFlyer(f: Flyer) {
-    f.alive = false;
-    f.respawn = this.scene === "dungeon" ? Infinity : 40;
-    sfx.stomp();
-    this.bits(f.x, f.y, 8, "#4a2f5e", "#bfdbe4");
+  /** Flying beetles need two hits (sword or stomp). */
+  private hitFlyer(f: Flyer) {
+    const killed = damageFlyer(f);
+    if (killed) {
+      f.respawn = this.scene === "dungeon" ? Infinity : 40;
+      sfx.stomp();
+      this.bits(f.x, f.y, 8, "#4a2f5e", "#bfdbe4");
+    } else if (f.alive) {
+      sfx.bossHit();
+      f.x += Math.sign(f.x - this.p.x) * 6;
+      this.bits(f.x, f.y, 4, "#4a2f5e", "#bfdbe4");
+    }
   }
 
   private hurt(amount: number, fromX: number) {
@@ -983,6 +988,7 @@ export class Game {
           f.y = f.baseY;
           f.state = "hover";
           f.cd = 2;
+          f.hp = 2;
         }
         continue;
       }
@@ -991,7 +997,7 @@ export class Game {
       if (!canFight) continue;
       if (Math.abs(f.x - p.x) < 7 && f.y > p.y - 24 && f.y < p.y + 4) {
         if (p.vy > 20 && p.y <= f.y - 1) {
-          this.killFlyer(f);
+          this.hitFlyer(f);
           p.vy = -190;
           p.onGround = false;
         } else if (p.invuln <= 0) this.hurt(FLYER_DAMAGE, f.x);
@@ -1057,37 +1063,120 @@ export class Game {
       if (Math.abs(b.x - p.x) > this.W * 2) continue;
       if (b.big) {
         b.hitT = (b.hitT ?? 0) - dt;
-        if (this.scene === "dungeon" && p.x > BOSS_ARENA_X && canFight) {
-          const before = b.chargeT ?? 2;
-          b.chargeT = before - dt;
-          if (before > 0 && b.chargeT <= 0) {
-            b.vx = (Math.sign(p.x - b.x) || 1) * 95;
-            sfx.bossHit();
-          }
-          if (b.chargeT <= -1.1) {
-            b.chargeT = 1.4 + Math.random() * 1.2;
-            b.vx = Math.sign(b.vx || 1) * 30;
-          }
+        const awake = this.scene === "dungeon" && !!this.dungeon && p.x > this.dungeon.bossArenaX && canFight;
+        if (awake) this.updateKing(b, dt);
+        else {
+          b.x += b.vx * dt;
+          if (b.x < b.minX) b.vx = Math.abs(b.vx);
+          if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
         }
+        b.y = this.groundAt(b.x) - (b.lift ?? 0);
+        if (b.mode !== "stun" && b.mode !== "windup") b.walkT += dt * 0.7 * (Math.abs(b.vx) > 60 ? 2 : 1);
+      } else {
+        b.x += b.vx * dt;
+        if (b.x < b.minX) b.vx = Math.abs(b.vx);
+        if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
+        b.y = this.groundAt(b.x);
+        b.walkT += dt;
       }
-      b.x += b.vx * dt;
-      if (b.x < b.minX) b.vx = Math.abs(b.vx);
-      if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
-      b.y = this.groundAt(b.x);
-      b.walkT += dt * (b.big ? 0.7 : 1);
       if (!canFight) continue;
-      const hw = b.big ? 14 : 8;
-      const top = b.big ? 16 : 8;
-      if (Math.abs(b.x - p.x) < hw && p.y > b.y - top && p.y - 15 < b.y) {
-        if (p.vy > 20 && p.y < b.y - top + 6) {
+      const hw = b.big ? 22 : 8;
+      const top = b.big ? 34 : 8;
+      const bx = b.big ? b.x + 4 * (Math.sign(b.vx) || 1) : b.x;
+      if (Math.abs(bx - p.x) < hw && p.y > b.y - top && p.y - 15 < b.y) {
+        if (p.vy > 20 && p.y < b.y - top + 8) {
           this.hitBeetle(b);
-          p.vy = b.big ? -230 : -180;
+          p.vy = b.big ? -250 : -180;
           p.onGround = false;
         } else if (p.invuln <= 0) {
           this.hurt(b.big ? BOSS_DAMAGE : BEETLE_DAMAGE, b.x);
         }
       }
     }
+  }
+
+  /** Beetle King AI: stalk, wind up and charge (stunned if he slams a wall), and — once hurt — leap and send shockwaves. */
+  private updateKing(b: Beetle, dt: number) {
+    const p = this.p;
+    const angry = (b.hp ?? 0) <= (b.maxHp ?? 1) / 2;
+    const dir = Math.sign(p.x - b.x) || 1;
+    b.timer = (b.timer ?? 2) - dt;
+    switch (b.mode ?? "walk") {
+      case "walk":
+        b.vx = dir * (angry ? 40 : 30);
+        if (b.timer <= 0) {
+          if (angry && Math.random() < 0.5) {
+            b.mode = "leap";
+            b.vy = -250;
+            b.lift = 0.01;
+            b.vx = dir * 75;
+            sfx.djump();
+          } else {
+            b.mode = "windup";
+            b.timer = angry ? 0.45 : 0.65;
+            b.vx = 0;
+          }
+        }
+        break;
+      case "windup":
+        b.vx = 0;
+        if (b.timer <= 0) {
+          b.mode = "charge";
+          b.timer = 1.4;
+          b.vx = dir * (angry ? 135 : 110);
+          sfx.bossHit();
+        }
+        break;
+      case "charge":
+        if (b.x <= b.minX + 1 || b.x >= b.maxX - 1) {
+          b.mode = "stun";
+          b.timer = 1.3;
+          b.vx = 0;
+          this.shakeT = 0.35;
+          sfx.stomp();
+          this.bits(b.x + Math.sign(b.vx || dir) * 20, b.y - 12, 10, "#4d4858", "#8a8496");
+        } else if (b.timer <= 0) {
+          b.mode = "walk";
+          b.timer = 1.4 + Math.random();
+        }
+        break;
+      case "stun":
+        b.vx = 0;
+        if (b.timer <= 0) {
+          b.mode = "walk";
+          b.timer = 1.2 + Math.random();
+        }
+        break;
+      case "leap": {
+        b.vy = (b.vy ?? 0) + GRAVITY * 0.9 * dt;
+        b.lift = (b.lift ?? 0) - (b.vy ?? 0) * dt;
+        if ((b.lift ?? 0) <= 0) {
+          b.lift = 0;
+          b.vy = 0;
+          b.mode = "walk";
+          b.timer = 1.6 + Math.random();
+          b.vx = 0;
+          this.shakeT = 0.45;
+          sfx.gate();
+          this.shockwaves.push({ x: b.x - 18, dir: -1, t: 0 }, { x: b.x + 18, dir: 1, t: 0 });
+          this.dust(b.x - 14, this.groundAt(b.x), 6);
+          this.dust(b.x + 14, this.groundAt(b.x), 6);
+        }
+        break;
+      }
+    }
+    b.x = clamp(b.x + b.vx * dt, b.minX, b.maxX);
+  }
+
+  private updateShockwaves(dt: number, active: boolean) {
+    const p = this.p;
+    this.shockwaves = this.shockwaves.filter((w) => {
+      w.t += dt;
+      w.x += w.dir * 120 * dt;
+      const g = this.groundAt(w.x);
+      if (active && p.invuln <= 0 && Math.abs(p.x - w.x) < 6 && p.y > g - 7) this.hurt(SHOCKWAVE_DAMAGE, w.x - w.dir * 10);
+      return w.t < 1.8;
+    });
   }
 
   private updateApples(dt: number) {
@@ -1478,28 +1567,70 @@ export class Game {
     for (const b of this.lvl.beetles) {
       if (!b.alive || b.x - cx < -30 || b.x - cx > this.W + 30) continue;
       if ((b.hitT ?? 0) > 0 && Math.floor(this.time * 20) % 2 === 0) continue;
+      if (b.big && (b.lift ?? 0) > 0) {
+        // shadow under the leaping king
+        this.ctx.globalAlpha = 0.35;
+        rect(ctx, "#000000", Math.round(b.x - cx) - 16, Math.round(this.groundAt(b.x) - cy) - 1, 32, 2);
+        this.ctx.globalAlpha = 1;
+      }
       if (b.big) {
-        ctx.save();
-        ctx.translate(Math.round(b.x - cx), Math.round(b.y - cy));
-        ctx.scale(2, 2);
-        drawBeetle(ctx, 0, 0, Math.sign(b.vx), b.walkT);
-        rect(ctx, "#f2c84b", -4, -12, 8, 2);
-        for (const x of [-4, 0, 3]) rect(ctx, "#f2c84b", x, -15, 1, 3);
-        ctx.restore();
+        const facing = Math.abs(b.vx) > 1 ? Math.sign(b.vx) : Math.sign(this.p.x - b.x) || 1;
+        drawBeetleKing(ctx, Math.round(b.x - cx), Math.round(b.y - cy), {
+          facing,
+          walk: b.walkT,
+          t: this.time,
+          angry: (b.hp ?? 0) <= (b.maxHp ?? 1) / 2,
+          mode: b.mode ?? "walk",
+          flash: false,
+        });
       } else drawBeetle(ctx, Math.round(b.x - cx), Math.round(b.y - cy), Math.sign(b.vx), b.walkT);
     }
     for (const f of this.lvl.flyers) {
       if (!f.alive || f.x - cx < -20 || f.x - cx > this.W + 20) continue;
+      if (f.hitT > 0 && Math.floor(this.time * 24) % 2 === 0) continue;
       drawFlyer(ctx, Math.round(f.x - cx), Math.round(f.y - cy), Math.sign(f.vx), f.flap, f.state === "dive");
     }
   }
 
+  /** Wooden sword sweep: an arc from over the shoulder down to the front, with a pale swoosh trail. */
   private drawAttack(cx: number, cy: number) {
     if (this.attackT <= 0) return;
-    const f = this.p.facing;
-    for (let i = 0; i < 8; i++) {
-      const progress = 1 - this.attackT / ATTACK_TIME;
-      rect(this.ctx, i % 2 ? "#efe8c4" : "#b8d870", Math.round(this.p.x - cx + f * (8 + progress * 12 + i % 3)), Math.round(this.p.y - cy - 8 - i * 2), 2, 2);
+    const p = this.p;
+    const f = p.facing >= 0 ? 1 : -1;
+    const k = clamp(1 - this.attackT / ATTACK_TIME, 0, 1);
+    const ease = 1 - (1 - k) * (1 - k);
+    const A0 = -2.1;
+    const A1 = 0.9;
+    const ang = (u: number) => {
+      const a = A0 + (A1 - A0) * u;
+      return f > 0 ? a : Math.PI - a;
+    };
+    const hx = Math.round(p.x - cx + f * 5);
+    const hy = Math.round(p.y - cy - 10);
+    const ctx = this.ctx;
+    for (let i = 0; i < 14; i++) {
+      const u = ease - i * 0.035;
+      if (u < 0) break;
+      const a = ang(u);
+      ctx.globalAlpha = 0.55 * (1 - i / 14);
+      rect(ctx, "#fff6d8", Math.round(hx + Math.cos(a) * 13), Math.round(hy + Math.sin(a) * 13), 2, 1);
+      rect(ctx, "#f3e2b0", Math.round(hx + Math.cos(a) * 10), Math.round(hy + Math.sin(a) * 10), 1, 1);
+    }
+    ctx.globalAlpha = 1;
+    drawSword(ctx, hx, hy, ang(ease));
+  }
+
+  private drawShockwaves(cx: number, cy: number) {
+    for (const w of this.shockwaves) {
+      const sx = Math.round(w.x - cx);
+      const gy = this.groundAt(w.x) - cy;
+      const a = Math.max(0, 1 - w.t / 1.8);
+      this.ctx.globalAlpha = a;
+      for (let i = 0; i < 5; i++) {
+        const h = 6 - Math.abs(i - 2) * 2 + (Math.floor(this.time * 20) % 2);
+        rect(this.ctx, i === 2 ? "#e8e0d0" : "#a8a0b8", sx - w.dir * i * 2, gy - h, 2, h);
+      }
+      this.ctx.globalAlpha = 1;
     }
   }
 
