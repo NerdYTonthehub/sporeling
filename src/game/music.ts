@@ -19,7 +19,10 @@ const fade = 1.5;
 const hz = (note: number): number => 440 * 2 ** ((note - 69) / 12);
 
 function ramp(param: AudioParam, value: number, time: number, duration: number): void {
-  param.cancelAndHoldAtTime(time);
+  // cancelAndHoldAtTime isn't available in every browser; hold the current value manually.
+  const now = param.value;
+  param.cancelScheduledValues(time);
+  param.setValueAtTime(now, time);
   param.linearRampToValueAtTime(value, time + duration);
 }
 

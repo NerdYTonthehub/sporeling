@@ -23,8 +23,9 @@ export function SettingsPanel({ settings, onChange, onClose }: { settings: Setti
         <h2 className="font-display text-base text-accent">Settings</h2>
         <GameButton onClick={onClose} aria-label="Back from settings" className="px-3 py-2 text-xs">← Back</GameButton>
       </div>
-      <div className="mb-4 flex items-center gap-4 border-b border-panel-edge/30 pb-4 text-xl">
+      <div className="mb-4 flex flex-wrap items-center gap-4 border-b border-panel-edge/30 pb-4 text-xl">
         <label className="flex items-center gap-2"><input type="checkbox" checked={settings.sound} onChange={(e) => onChange({ ...settings, sound: e.target.checked })} className="accent-accent" />Sound</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={settings.music} onChange={(e) => onChange({ ...settings, music: e.target.checked })} className="accent-accent" />Music</label>
         <label className="flex min-w-0 flex-1 items-center gap-2">Volume<input aria-label="Sound volume" type="range" min="0" max="100" value={Math.round(settings.volume * 100)} onChange={(e) => onChange({ ...settings, volume: Number(e.target.value) / 100 })} onPointerUp={() => { initAudio(); sfx.menu(); }} className="w-full min-w-0 accent-accent" /><span className="w-10 text-right">{Math.round(settings.volume * 100)}%</span></label>
       </div>
       <h3 className="mb-2 font-display text-xs text-accent">Controls</h3>

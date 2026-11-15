@@ -1,25 +1,31 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
-import { appleTreeGeom, drawAppleTree, drawBeetle, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, fillCircle, rect } from "./sprites";
+import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
 import { FISH, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
 import { sfx } from "./sfx";
 import { eatApple, eatGlowcap, isDead, nap, takeDamage, tickVitals, type Vitals } from "./vitals";
-import { ATTACK_COOLDOWN, ATTACK_REACH, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
+import { ATTACK_COOLDOWN, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, damageFlyer, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
 import {
-  DUNGEON_CEIL,
-  DUNGEON_FLOOR,
+  PIT_Y,
+  ceilAt,
   createDungeon,
   drawDoorway,
   drawDungeonBack,
   drawDungeonFloor,
+  drawDungeonLights,
   drawGate,
   drawGlowcap,
   drawShrine,
-  dungeonFloorY,
+  floorAt,
   type Dungeon,
 } from "./dungeon";
+import { SAVE_VERSION, type SaveData } from "./save";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, drawRoom, moveInRoom, nearbyFurn, type Room, type RoomPlayer } from "./interior";
 import {
   GROUND_BASE,
+  LAKE_EDGE,
+  LAKE_MIN_X,
+  LAKE_Y,
+  PIER_X0,
   WORLD_W,
   generateWorld,
   hash1,
@@ -43,12 +49,13 @@ const GRAVITY = 640;
 const JUMP_V = 220;
 const APPLE_REGROW = 25;
 const DAY_LENGTH = 240;
-const START_X = 230;
+const START_X = 960;
 const RELEASE_TIME = 3.6;
 const ROOM_SPEED = 46;
 const FADE = 0.5;
-/** Boss arena starts past the second root gate. */
-const BOSS_ARENA_X = 1100;
+/** Damage for falling into the dungeon's spike pit. */
+const PIT_DAMAGE = 15;
+const SHOCKWAVE_DAMAGE = 14;
 
 export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
 export type Scene = "forest" | "dungeon" | "room";
@@ -59,6 +66,13 @@ interface Level {
   platforms: Platform[];
   beetles: Beetle[];
   flyers: Flyer[];
+  ceil?: Int16Array;
+}
+
+interface Shockwave {
+  x: number;
+  dir: number;
+  t: number;
 }
 
 export interface HudState {
@@ -178,6 +192,8 @@ export class Game {
   private swingHits = new Set<object>();
   private paused = false;
   private fade: { t: number; action: (() => void) | null } | null = null;
+  private shockwaves: Shockwave[] = [];
+  private lakeHintT = 0;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -238,6 +254,7 @@ export class Game {
     this.attackT = 0;
     this.attackCd = 0;
     this.fade = null;
+    this.shockwaves = [];
     this.paused = false;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
@@ -301,6 +318,65 @@ export class Game {
     this.labels = l;
   }
 
+  // ---------- save games ----------
+  /** Progress snapshot for the save system (forest position; indoors/dungeon resume at the door). */
+  snapshot(): SaveData {
+    const inForest = this.scene === "forest";
+    return {
+      v: SAVE_VERSION,
+      savedAt: Date.now(),
+      x: Math.round(inForest ? this.p.x : this.returnPos.x),
+      y: Math.round(inForest ? this.p.y : this.returnPos.y),
+      health: this.vitals.health,
+      hunger: this.vitals.hunger,
+      coins: this.coins,
+      inventory: { ...this.inventory },
+      fishCaught: this.fishCaught,
+      fishReleased: this.fishReleased,
+      applesEaten: this.applesEaten,
+      time: Math.round(this.time),
+      doubleJump: this.hasDoubleJump,
+      dungeonCleared: !!this.dungeon?.relicTaken,
+      discovered: this.world.villages.filter((v) => v.discovered).map((v) => v.name),
+    };
+  }
+
+  /** Start a fresh world and apply a save on top of it. */
+  loadSave(s: SaveData) {
+    this.reset();
+    this.vitals = { health: s.health, hunger: s.hunger };
+    this.coins = s.coins;
+    this.inventory = { ...s.inventory };
+    this.fishCaught = s.fishCaught;
+    this.fishReleased = s.fishReleased;
+    this.applesEaten = s.applesEaten;
+    this.time = s.time;
+    this.hasDoubleJump = s.doubleJump;
+    for (const v of this.world.villages) v.discovered = s.discovered.includes(v.name);
+    if (s.dungeonCleared) {
+      const d = createDungeon();
+      d.relicTaken = true;
+      for (const b of d.beetles) b.alive = false;
+      for (const f of d.flyers) f.alive = false;
+      for (const g of d.gates) {
+        g.open = true;
+        g.openT = 1;
+      }
+      for (const g of d.glowcaps) g.eaten = true;
+      this.dungeon = d;
+    }
+    const p = this.p;
+    p.x = clamp(s.x, LAKE_MIN_X, WORLD_W - 12);
+    // land on whatever is below the saved spot (a deck, bridge or the ground)
+    p.y = Math.min(s.y, this.groundAt(p.x));
+    p.onGround = false;
+    p.plat = null;
+    this.snapCamera();
+    this.camY = Math.min(p.y - this.H * 0.64, this.groundAt(p.x) + 38 - this.H);
+    this.running = true;
+    this.emitHud();
+  }
+
   private villageFloor(v: Village) {
     return v.floorY ?? this.groundAt(v.x);
   }
@@ -309,6 +385,13 @@ export class Game {
     const w = this.lvl.w;
     const i = x < 0 ? 0 : x > w ? w : x | 0;
     return this.lvl.ground[i] ?? GROUND_BASE;
+  }
+
+  private ceilAt(x: number) {
+    const c = this.lvl.ceil;
+    if (!c) return -99999;
+    const i = x < 0 ? 0 : x > this.lvl.w ? this.lvl.w : x | 0;
+    return c[i] ?? -99999;
   }
 
   private darkness() {
@@ -370,8 +453,18 @@ export class Game {
   private snapCamera() {
     const p = this.p;
     this.camX = clamp(p.x - this.W / 2, 0, Math.max(0, this.lvl.w - this.W));
-    this.camY =
-      this.scene === "dungeon" ? DUNGEON_FLOOR + 38 - this.H : Math.min(p.y - this.H * 0.64, this.groundAt(p.x) + 38 - this.H);
+    this.camY = this.cameraTargetY();
+  }
+
+  private cameraTargetY() {
+    const p = this.p;
+    const g = this.groundAt(p.x);
+    if (this.scene === "dungeon") return Math.max(-30, Math.min(p.y - this.H * 0.62, g + 38 - this.H));
+    return Math.min(p.y - this.H * 0.64, g + 38 - this.H);
+  }
+
+  private minX() {
+    return this.scene === "forest" ? LAKE_MIN_X : 12;
   }
 
   private maxX() {
@@ -447,10 +540,20 @@ export class Game {
 
     p.vy = Math.min(400, p.vy + GRAVITY * dt);
     const prevY = p.y;
-    p.x = clamp(p.x + p.vx * dt, 12, this.maxX());
+    const nx = clamp(p.x + p.vx * dt, this.minX(), this.maxX());
+    // walls: a floor step more than 6px above your feet, or a ceiling lower than your head, blocks you
+    const blocked = this.groundAt(nx) < p.y - 6 || this.ceilAt(nx) > p.y - 21;
+    if (blocked) p.vx = 0;
+    else p.x = nx;
+    if (this.scene === "forest" && p.x <= this.minX() + 0.5 && this.keys.left && this.lakeHintT <= 0 && this.running) {
+      this.lakeHintT = 6;
+      this.showToast("The Great Lake is far too deep to cross.");
+    }
+    this.lakeHintT -= dt;
     p.y += p.vy * dt;
-    if (this.scene === "dungeon" && p.y - 22 < DUNGEON_CEIL) {
-      p.y = DUNGEON_CEIL + 22;
+    const ceil = this.ceilAt(p.x);
+    if (p.y - 22 < ceil) {
+      p.y = ceil + 22;
       if (p.vy < 0) p.vy = 0;
     }
 
@@ -496,6 +599,34 @@ export class Game {
       p.plat = null;
     }
     if (p.onGround && Math.abs(p.vx) > 4) p.walkT += dt * (Math.abs(p.vx) / MAX_SPEED);
+    // fell off the pier into the lake: splash back onto the shore
+    if (this.scene === "forest" && p.x < LAKE_EDGE && !p.plat && p.y >= LAKE_Y - 0.5 && active && !this.fade) {
+      sfx.splash();
+      for (let i = 0; i < 12; i++) this.spawn({ x: p.x, y: LAKE_Y, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
+      this.transition(() => {
+        p.x = LAKE_EDGE + 40;
+        p.y = this.groundAt(p.x);
+        p.vx = 0;
+        p.vy = 0;
+        this.snapCamera();
+        this.showToast("Brrr! The lake is far too deep to swim.");
+      });
+    }
+    // fell into the spike pit: ouch, back to the start of the jumps
+    if (this.scene === "dungeon" && this.dungeon && landed && !p.plat && p.y >= PIT_Y - 1 && active && !this.fade) {
+      const d = this.dungeon;
+      this.hurt(PIT_DAMAGE, p.x);
+      if (!this.dead) {
+        this.transition(() => {
+          p.x = d.checkpointX;
+          p.y = this.groundAt(p.x);
+          p.vx = 0;
+          p.vy = 0;
+          p.invuln = 1;
+          this.snapCamera();
+        });
+      }
+    }
 
     // vitals
     this.nearFire =
@@ -533,6 +664,7 @@ export class Game {
     if (this.scene === "forest") this.updateNpcs(dt);
     this.updateBeetles(dt, active);
     this.updateFlyers(dt, active);
+    this.updateShockwaves(dt, active && this.mode !== "releasing" && !this.fade);
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
     if (active && this.attackT > 0) this.resolveAttack();
@@ -549,13 +681,7 @@ export class Game {
     // camera
     const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, Math.max(0, this.lvl.w - this.W));
     this.camX += (targetX - this.camX) * Math.min(1, dt * 4);
-    if (this.scene === "dungeon") {
-      this.camY = DUNGEON_FLOOR + 38 - this.H;
-    } else {
-      const maxY = this.groundAt(p.x) + 38 - this.H;
-      const targetY = Math.min(p.y - this.H * 0.64, maxY);
-      this.camY += (targetY - this.camY) * Math.min(1, dt * 3);
-    }
+    this.camY += (this.cameraTargetY() - this.camY) * Math.min(1, dt * 3);
     this.shakeT -= dt;
   }
 
@@ -707,7 +833,9 @@ export class Game {
       if (g.open && g.openT < 1) g.openT = Math.min(1, g.openT + dt * 0.9);
     }
     if (Math.random() < dt * 3) {
-      this.spawn({ x: this.camX + Math.random() * this.W, y: DUNGEON_CEIL + 20 + Math.random() * 120, vx: (Math.random() - 0.5) * 4, vy: -2, life: 4 + Math.random() * 3, color: "#a8fff0", size: 1, grav: 0, kind: "firefly" });
+      const fx = this.camX + Math.random() * this.W;
+      const top = ceilAt(d, fx);
+      this.spawn({ x: fx, y: top + 10 + Math.random() * Math.max(10, floorAt(d, fx) - top - 20), vx: (Math.random() - 0.5) * 4, vy: -2, life: 4 + Math.random() * 3, color: "#a8fff0", size: 1, grav: 0, kind: "firefly" });
     }
   }
 
@@ -747,7 +875,7 @@ export class Game {
     this.shakeT = 0.3;
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2;
-      this.spawn({ x: d.shrineX, y: DUNGEON_FLOOR - 24, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60, life: 1.2, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
+      this.spawn({ x: d.shrineX, y: floorAt(d, d.shrineX) - 24, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60, life: 1.2, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
     }
     this.banner = { title: "Double jump!", sub: `Press ${this.labels.jump} again in mid-air`, t: 5 };
     this.talking = {
@@ -768,18 +896,15 @@ export class Game {
     this.attackT = ATTACK_TIME;
     this.attackCd = ATTACK_COOLDOWN;
     this.swingHits = new Set();
-    sfx.puff();
-    const f = p.facing >= 0 ? 1 : -1;
-    for (let i = 0; i < 10; i++) {
-      this.spawn({ x: p.x + f * 6, y: p.y - 10 + (Math.random() - 0.5) * 8, vx: f * (60 + Math.random() * 90), vy: (Math.random() - 0.5) * 30, life: 0.2 + Math.random() * 0.15, color: i % 3 ? "#efe8c4" : "#b8d870", size: i % 2 ? 2 : 1, grav: -20, kind: "bit" });
-    }
+    sfx.swing();
+    void p;
   }
 
   private resolveAttack() {
     const p = this.p;
     for (const b of this.lvl.beetles) {
       if (!b.alive || this.swingHits.has(b)) continue;
-      if (attackHits(p.x, p.y, p.facing, b.x, b.y - (b.big ? 8 : 4), b.big ? 12 : 5, b.big ? 8 : 5)) {
+      if (attackHits(p.x, p.y, p.facing, b.big ? b.x + 4 * (Math.sign(b.vx) || 1) : b.x, b.y - (b.big ? 16 : 4), b.big ? 20 : 5, b.big ? 16 : 5)) {
         this.swingHits.add(b);
         this.hitBeetle(b);
       }
@@ -788,7 +913,7 @@ export class Game {
       if (!f.alive || this.swingHits.has(f)) continue;
       if (attackHits(p.x, p.y, p.facing, f.x, f.y)) {
         this.swingHits.add(f);
-        this.killFlyer(f);
+        this.hitFlyer(f);
       }
     }
   }
@@ -807,7 +932,7 @@ export class Game {
       b.hitT = 0.5;
       const away = Math.sign(b.x - this.p.x) || 1;
       b.x = clamp(b.x + away * 8, b.minX, b.maxX);
-      b.vx = away * Math.abs(b.vx || 30);
+      if (!b.big) b.vx = away * Math.abs(b.vx || 30);
       this.shakeT = 0.15;
       sfx.bossHit();
       this.bits(b.x, b.y - 10, 6, "#1f2e2b", "#f2c84b");
@@ -823,11 +948,18 @@ export class Game {
     }
   }
 
-  private killFlyer(f: Flyer) {
-    f.alive = false;
-    f.respawn = this.scene === "dungeon" ? Infinity : 40;
-    sfx.stomp();
-    this.bits(f.x, f.y, 8, "#4a2f5e", "#bfdbe4");
+  /** Flying beetles need two hits (sword or stomp). */
+  private hitFlyer(f: Flyer) {
+    const killed = damageFlyer(f);
+    if (killed) {
+      f.respawn = this.scene === "dungeon" ? Infinity : 40;
+      sfx.stomp();
+      this.bits(f.x, f.y, 8, "#4a2f5e", "#bfdbe4");
+    } else if (f.alive) {
+      sfx.bossHit();
+      f.x += Math.sign(f.x - this.p.x) * 6;
+      this.bits(f.x, f.y, 4, "#4a2f5e", "#bfdbe4");
+    }
   }
 
   private hurt(amount: number, fromX: number) {
@@ -856,6 +988,7 @@ export class Game {
           f.y = f.baseY;
           f.state = "hover";
           f.cd = 2;
+          f.hp = 2;
         }
         continue;
       }
@@ -864,7 +997,7 @@ export class Game {
       if (!canFight) continue;
       if (Math.abs(f.x - p.x) < 7 && f.y > p.y - 24 && f.y < p.y + 4) {
         if (p.vy > 20 && p.y <= f.y - 1) {
-          this.killFlyer(f);
+          this.hitFlyer(f);
           p.vy = -190;
           p.onGround = false;
         } else if (p.invuln <= 0) this.hurt(FLYER_DAMAGE, f.x);
@@ -930,37 +1063,120 @@ export class Game {
       if (Math.abs(b.x - p.x) > this.W * 2) continue;
       if (b.big) {
         b.hitT = (b.hitT ?? 0) - dt;
-        if (this.scene === "dungeon" && p.x > BOSS_ARENA_X && canFight) {
-          const before = b.chargeT ?? 2;
-          b.chargeT = before - dt;
-          if (before > 0 && b.chargeT <= 0) {
-            b.vx = (Math.sign(p.x - b.x) || 1) * 95;
-            sfx.bossHit();
-          }
-          if (b.chargeT <= -1.1) {
-            b.chargeT = 1.4 + Math.random() * 1.2;
-            b.vx = Math.sign(b.vx || 1) * 30;
-          }
+        const awake = this.scene === "dungeon" && !!this.dungeon && p.x > this.dungeon.bossArenaX && canFight;
+        if (awake) this.updateKing(b, dt);
+        else {
+          b.x += b.vx * dt;
+          if (b.x < b.minX) b.vx = Math.abs(b.vx);
+          if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
         }
+        b.y = this.groundAt(b.x) - (b.lift ?? 0);
+        if (b.mode !== "stun" && b.mode !== "windup") b.walkT += dt * 0.7 * (Math.abs(b.vx) > 60 ? 2 : 1);
+      } else {
+        b.x += b.vx * dt;
+        if (b.x < b.minX) b.vx = Math.abs(b.vx);
+        if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
+        b.y = this.groundAt(b.x);
+        b.walkT += dt;
       }
-      b.x += b.vx * dt;
-      if (b.x < b.minX) b.vx = Math.abs(b.vx);
-      if (b.x > b.maxX) b.vx = -Math.abs(b.vx);
-      b.y = this.groundAt(b.x);
-      b.walkT += dt * (b.big ? 0.7 : 1);
       if (!canFight) continue;
-      const hw = b.big ? 14 : 8;
-      const top = b.big ? 16 : 8;
-      if (Math.abs(b.x - p.x) < hw && p.y > b.y - top && p.y - 15 < b.y) {
-        if (p.vy > 20 && p.y < b.y - top + 6) {
+      const hw = b.big ? 22 : 8;
+      const top = b.big ? 34 : 8;
+      const bx = b.big ? b.x + 4 * (Math.sign(b.vx) || 1) : b.x;
+      if (Math.abs(bx - p.x) < hw && p.y > b.y - top && p.y - 15 < b.y) {
+        if (p.vy > 20 && p.y < b.y - top + 8) {
           this.hitBeetle(b);
-          p.vy = b.big ? -230 : -180;
+          p.vy = b.big ? -250 : -180;
           p.onGround = false;
         } else if (p.invuln <= 0) {
           this.hurt(b.big ? BOSS_DAMAGE : BEETLE_DAMAGE, b.x);
         }
       }
     }
+  }
+
+  /** Beetle King AI: stalk, wind up and charge (stunned if he slams a wall), and — once hurt — leap and send shockwaves. */
+  private updateKing(b: Beetle, dt: number) {
+    const p = this.p;
+    const angry = (b.hp ?? 0) <= (b.maxHp ?? 1) / 2;
+    const dir = Math.sign(p.x - b.x) || 1;
+    b.timer = (b.timer ?? 2) - dt;
+    switch (b.mode ?? "walk") {
+      case "walk":
+        b.vx = dir * (angry ? 40 : 30);
+        if (b.timer <= 0) {
+          if (angry && Math.random() < 0.5) {
+            b.mode = "leap";
+            b.vy = -250;
+            b.lift = 0.01;
+            b.vx = dir * 75;
+            sfx.djump();
+          } else {
+            b.mode = "windup";
+            b.timer = angry ? 0.45 : 0.65;
+            b.vx = 0;
+          }
+        }
+        break;
+      case "windup":
+        b.vx = 0;
+        if (b.timer <= 0) {
+          b.mode = "charge";
+          b.timer = 1.4;
+          b.vx = dir * (angry ? 135 : 110);
+          sfx.bossHit();
+        }
+        break;
+      case "charge":
+        if (b.x <= b.minX + 1 || b.x >= b.maxX - 1) {
+          b.mode = "stun";
+          b.timer = 1.3;
+          b.vx = 0;
+          this.shakeT = 0.35;
+          sfx.stomp();
+          this.bits(b.x + Math.sign(b.vx || dir) * 20, b.y - 12, 10, "#4d4858", "#8a8496");
+        } else if (b.timer <= 0) {
+          b.mode = "walk";
+          b.timer = 1.4 + Math.random();
+        }
+        break;
+      case "stun":
+        b.vx = 0;
+        if (b.timer <= 0) {
+          b.mode = "walk";
+          b.timer = 1.2 + Math.random();
+        }
+        break;
+      case "leap": {
+        b.vy = (b.vy ?? 0) + GRAVITY * 0.9 * dt;
+        b.lift = (b.lift ?? 0) - (b.vy ?? 0) * dt;
+        if ((b.lift ?? 0) <= 0) {
+          b.lift = 0;
+          b.vy = 0;
+          b.mode = "walk";
+          b.timer = 1.6 + Math.random();
+          b.vx = 0;
+          this.shakeT = 0.45;
+          sfx.gate();
+          this.shockwaves.push({ x: b.x - 18, dir: -1, t: 0 }, { x: b.x + 18, dir: 1, t: 0 });
+          this.dust(b.x - 14, this.groundAt(b.x), 6);
+          this.dust(b.x + 14, this.groundAt(b.x), 6);
+        }
+        break;
+      }
+    }
+    b.x = clamp(b.x + b.vx * dt, b.minX, b.maxX);
+  }
+
+  private updateShockwaves(dt: number, active: boolean) {
+    const p = this.p;
+    this.shockwaves = this.shockwaves.filter((w) => {
+      w.t += dt;
+      w.x += w.dir * 120 * dt;
+      const g = this.groundAt(w.x);
+      if (active && p.invuln <= 0 && Math.abs(p.x - w.x) < 6 && p.y > g - 7) this.hurt(SHOCKWAVE_DAMAGE, w.x - w.dir * 10);
+      return w.t < 1.8;
+    });
   }
 
   private updateApples(dt: number) {
@@ -1304,7 +1520,7 @@ export class Game {
       coinPop: this.coinPop ? { amount: this.coinPop.amount, id: this.coinPop.id } : null,
       scene: this.scene,
       doubleJump: this.hasDoubleJump,
-      boss: boss && p.x > BOSS_ARENA_X ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
+      boss: boss && this.dungeon && p.x > this.dungeon.bossArenaX ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
     });
   }
 
@@ -1329,21 +1545,23 @@ export class Game {
     const cx = Math.round(this.camX);
     const cy = Math.round(this.camY);
     drawDungeonBack(ctx, d, cx, cy, this.W, this.H, this.time);
-    drawDoorway(ctx, d.entryX, cx, cy, this.darkness() > 0.5);
-    drawDoorway(ctx, d.exitX, cx, cy, this.darkness() > 0.5);
+    drawDoorway(ctx, d, d.entryX, cx, cy, this.darkness() > 0.5);
+    drawDoorway(ctx, d, d.exitX, cx, cy, this.darkness() > 0.5);
     for (const pl of d.platforms) this.drawPlatform(pl, cx, cy);
     drawDungeonFloor(ctx, d, cx, cy, this.W, this.H);
-    for (const g of d.glowcaps) drawGlowcap(ctx, g, cx, cy);
+    for (const g of d.glowcaps) drawGlowcap(ctx, d, g, cx, cy);
     drawShrine(ctx, d, cx, cy, this.time);
     this.drawEnemies(cx, cy);
+    this.drawShockwaves(cx, cy);
     const p = this.p;
     if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
       drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), { facing: p.facing, walk: p.walkT, moving: Math.abs(p.vx) > 4, air: !p.onGround, cap: "#d9443a", spots: true, scale: 1, blink: this.dead || p.blinkT < 0 });
     }
     this.drawAttack(cx, cy);
     this.drawParticles(cx, cy, false);
+    for (const g of d.gates) drawGate(ctx, d, g, cx, cy, this.time);
+    drawDungeonLights(ctx, d, cx, cy, this.W, this.H, this.time, Math.round(p.x - cx), Math.round(p.y - cy));
     this.drawParticles(cx, cy, true);
-    for (const g of d.gates) drawGate(ctx, g, cx, cy, this.time);
   }
 
   private drawEnemies(cx: number, cy: number) {
@@ -1351,28 +1569,70 @@ export class Game {
     for (const b of this.lvl.beetles) {
       if (!b.alive || b.x - cx < -30 || b.x - cx > this.W + 30) continue;
       if ((b.hitT ?? 0) > 0 && Math.floor(this.time * 20) % 2 === 0) continue;
+      if (b.big && (b.lift ?? 0) > 0) {
+        // shadow under the leaping king
+        this.ctx.globalAlpha = 0.35;
+        rect(ctx, "#000000", Math.round(b.x - cx) - 16, Math.round(this.groundAt(b.x) - cy) - 1, 32, 2);
+        this.ctx.globalAlpha = 1;
+      }
       if (b.big) {
-        ctx.save();
-        ctx.translate(Math.round(b.x - cx), Math.round(b.y - cy));
-        ctx.scale(2, 2);
-        drawBeetle(ctx, 0, 0, Math.sign(b.vx), b.walkT);
-        rect(ctx, "#f2c84b", -4, -12, 8, 2);
-        for (const x of [-4, 0, 3]) rect(ctx, "#f2c84b", x, -15, 1, 3);
-        ctx.restore();
+        const facing = Math.abs(b.vx) > 1 ? Math.sign(b.vx) : Math.sign(this.p.x - b.x) || 1;
+        drawBeetleKing(ctx, Math.round(b.x - cx), Math.round(b.y - cy), {
+          facing,
+          walk: b.walkT,
+          t: this.time,
+          angry: (b.hp ?? 0) <= (b.maxHp ?? 1) / 2,
+          mode: b.mode ?? "walk",
+          flash: false,
+        });
       } else drawBeetle(ctx, Math.round(b.x - cx), Math.round(b.y - cy), Math.sign(b.vx), b.walkT);
     }
     for (const f of this.lvl.flyers) {
       if (!f.alive || f.x - cx < -20 || f.x - cx > this.W + 20) continue;
+      if (f.hitT > 0 && Math.floor(this.time * 24) % 2 === 0) continue;
       drawFlyer(ctx, Math.round(f.x - cx), Math.round(f.y - cy), Math.sign(f.vx), f.flap, f.state === "dive");
     }
   }
 
+  /** Wooden sword sweep: an arc from over the shoulder down to the front, with a pale swoosh trail. */
   private drawAttack(cx: number, cy: number) {
     if (this.attackT <= 0) return;
-    const f = this.p.facing;
-    for (let i = 0; i < 8; i++) {
-      const progress = 1 - this.attackT / ATTACK_TIME;
-      rect(this.ctx, i % 2 ? "#efe8c4" : "#b8d870", Math.round(this.p.x - cx + f * (8 + progress * 12 + i % 3)), Math.round(this.p.y - cy - 8 - i * 2), 2, 2);
+    const p = this.p;
+    const f = p.facing >= 0 ? 1 : -1;
+    const k = clamp(1 - this.attackT / ATTACK_TIME, 0, 1);
+    const ease = 1 - (1 - k) * (1 - k);
+    const A0 = -2.1;
+    const A1 = 0.9;
+    const ang = (u: number) => {
+      const a = A0 + (A1 - A0) * u;
+      return f > 0 ? a : Math.PI - a;
+    };
+    const hx = Math.round(p.x - cx + f * 5);
+    const hy = Math.round(p.y - cy - 10);
+    const ctx = this.ctx;
+    for (let i = 0; i < 14; i++) {
+      const u = ease - i * 0.035;
+      if (u < 0) break;
+      const a = ang(u);
+      ctx.globalAlpha = 0.55 * (1 - i / 14);
+      rect(ctx, "#fff6d8", Math.round(hx + Math.cos(a) * 13), Math.round(hy + Math.sin(a) * 13), 2, 1);
+      rect(ctx, "#f3e2b0", Math.round(hx + Math.cos(a) * 10), Math.round(hy + Math.sin(a) * 10), 1, 1);
+    }
+    ctx.globalAlpha = 1;
+    drawSword(ctx, hx, hy, ang(ease));
+  }
+
+  private drawShockwaves(cx: number, cy: number) {
+    for (const w of this.shockwaves) {
+      const sx = Math.round(w.x - cx);
+      const gy = this.groundAt(w.x) - cy;
+      const a = Math.max(0, 1 - w.t / 1.8);
+      this.ctx.globalAlpha = a;
+      for (let i = 0; i < 5; i++) {
+        const h = 6 - Math.abs(i - 2) * 2 + (Math.floor(this.time * 20) % 2);
+        rect(this.ctx, i === 2 ? "#e8e0d0" : "#a8a0b8", sx - w.dir * i * 2, gy - h, 2, h);
+      }
+      this.ctx.globalAlpha = 1;
     }
   }
 

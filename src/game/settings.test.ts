@@ -30,6 +30,12 @@ describe("settings", () => {
     expect(s.keys.left).toEqual(DEFAULT_KEYS.left);
   });
 
+  it("music is on by default, also for settings saved before music existed", () => {
+    expect(parseSettings(null).music).toBe(true);
+    expect(parseSettings(JSON.stringify({ sound: true, volume: 0.5 })).music).toBe(true);
+    expect(parseSettings(JSON.stringify({ music: false })).music).toBe(false);
+  });
+
   it("shows friendly key names", () => {
     expect(keyLabel("KeyQ")).toBe("Q");
     expect(keyLabel("ArrowUp")).toBe("↑");
