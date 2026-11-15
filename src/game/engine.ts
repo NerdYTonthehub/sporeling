@@ -318,6 +318,65 @@ export class Game {
     this.labels = l;
   }
 
+  // ---------- save games ----------
+  /** Progress snapshot for the save system (forest position; indoors/dungeon resume at the door). */
+  snapshot(): SaveData {
+    const inForest = this.scene === "forest";
+    return {
+      v: SAVE_VERSION,
+      savedAt: Date.now(),
+      x: Math.round(inForest ? this.p.x : this.returnPos.x),
+      y: Math.round(inForest ? this.p.y : this.returnPos.y),
+      health: this.vitals.health,
+      hunger: this.vitals.hunger,
+      coins: this.coins,
+      inventory: { ...this.inventory },
+      fishCaught: this.fishCaught,
+      fishReleased: this.fishReleased,
+      applesEaten: this.applesEaten,
+      time: Math.round(this.time),
+      doubleJump: this.hasDoubleJump,
+      dungeonCleared: !!this.dungeon?.relicTaken,
+      discovered: this.world.villages.filter((v) => v.discovered).map((v) => v.name),
+    };
+  }
+
+  /** Start a fresh world and apply a save on top of it. */
+  loadSave(s: SaveData) {
+    this.reset();
+    this.vitals = { health: s.health, hunger: s.hunger };
+    this.coins = s.coins;
+    this.inventory = { ...s.inventory };
+    this.fishCaught = s.fishCaught;
+    this.fishReleased = s.fishReleased;
+    this.applesEaten = s.applesEaten;
+    this.time = s.time;
+    this.hasDoubleJump = s.doubleJump;
+    for (const v of this.world.villages) v.discovered = s.discovered.includes(v.name);
+    if (s.dungeonCleared) {
+      const d = createDungeon();
+      d.relicTaken = true;
+      for (const b of d.beetles) b.alive = false;
+      for (const f of d.flyers) f.alive = false;
+      for (const g of d.gates) {
+        g.open = true;
+        g.openT = 1;
+      }
+      for (const g of d.glowcaps) g.eaten = true;
+      this.dungeon = d;
+    }
+    const p = this.p;
+    p.x = clamp(s.x, LAKE_MIN_X, WORLD_W - 12);
+    // land on whatever is below the saved spot (a deck, bridge or the ground)
+    p.y = Math.min(s.y, this.groundAt(p.x));
+    p.onGround = false;
+    p.plat = null;
+    this.snapCamera();
+    this.camY = Math.min(p.y - this.H * 0.64, this.groundAt(p.x) + 38 - this.H);
+    this.running = true;
+    this.emitHud();
+  }
+
   private villageFloor(v: Village) {
     return v.floorY ?? this.groundAt(v.x);
   }
@@ -326,6 +385,13 @@ export class Game {
     const w = this.lvl.w;
     const i = x < 0 ? 0 : x > w ? w : x | 0;
     return this.lvl.ground[i] ?? GROUND_BASE;
+  }
+
+  private ceilAt(x: number) {
+    const c = this.lvl.ceil;
+    if (!c) return -99999;
+    const i = x < 0 ? 0 : x > this.lvl.w ? this.lvl.w : x | 0;
+    return c[i] ?? -99999;
   }
 
   private darkness() {
@@ -387,8 +453,18 @@ export class Game {
   private snapCamera() {
     const p = this.p;
     this.camX = clamp(p.x - this.W / 2, 0, Math.max(0, this.lvl.w - this.W));
-    this.camY =
-      this.scene === "dungeon" ? DUNGEON_FLOOR + 38 - this.H : Math.min(p.y - this.H * 0.64, this.groundAt(p.x) + 38 - this.H);
+    this.camY = this.cameraTargetY();
+  }
+
+  private cameraTargetY() {
+    const p = this.p;
+    const g = this.groundAt(p.x);
+    if (this.scene === "dungeon") return Math.max(-30, Math.min(p.y - this.H * 0.62, g + 38 - this.H));
+    return Math.min(p.y - this.H * 0.64, g + 38 - this.H);
+  }
+
+  private minX() {
+    return this.scene === "forest" ? LAKE_MIN_X : 12;
   }
 
   private maxX() {
@@ -464,10 +540,20 @@ export class Game {
 
     p.vy = Math.min(400, p.vy + GRAVITY * dt);
     const prevY = p.y;
-    p.x = clamp(p.x + p.vx * dt, 12, this.maxX());
+    const nx = clamp(p.x + p.vx * dt, this.minX(), this.maxX());
+    // walls: a floor step more than 6px above your feet, or a ceiling lower than your head, blocks you
+    const blocked = this.groundAt(nx) < p.y - 6 || this.ceilAt(nx) > p.y - 21;
+    if (blocked) p.vx = 0;
+    else p.x = nx;
+    if (this.scene === "forest" && p.x <= this.minX() + 0.5 && this.keys.left && this.lakeHintT <= 0 && this.running) {
+      this.lakeHintT = 6;
+      this.showToast("The Great Lake is far too deep to cross.");
+    }
+    this.lakeHintT -= dt;
     p.y += p.vy * dt;
-    if (this.scene === "dungeon" && p.y - 22 < DUNGEON_CEIL) {
-      p.y = DUNGEON_CEIL + 22;
+    const ceil = this.ceilAt(p.x);
+    if (p.y - 22 < ceil) {
+      p.y = ceil + 22;
       if (p.vy < 0) p.vy = 0;
     }
 
@@ -513,6 +599,34 @@ export class Game {
       p.plat = null;
     }
     if (p.onGround && Math.abs(p.vx) > 4) p.walkT += dt * (Math.abs(p.vx) / MAX_SPEED);
+    // fell off the pier into the lake: splash back onto the shore
+    if (this.scene === "forest" && p.x < LAKE_EDGE && !p.plat && p.y >= LAKE_Y - 0.5 && active && !this.fade) {
+      sfx.splash();
+      for (let i = 0; i < 12; i++) this.spawn({ x: p.x, y: LAKE_Y, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
+      this.transition(() => {
+        p.x = LAKE_EDGE + 40;
+        p.y = this.groundAt(p.x);
+        p.vx = 0;
+        p.vy = 0;
+        this.snapCamera();
+        this.showToast("Brrr! The lake is far too deep to swim.");
+      });
+    }
+    // fell into the spike pit: ouch, back to the start of the jumps
+    if (this.scene === "dungeon" && this.dungeon && landed && !p.plat && p.y >= PIT_Y - 1 && active && !this.fade) {
+      const d = this.dungeon;
+      this.hurt(PIT_DAMAGE, p.x);
+      if (!this.dead) {
+        this.transition(() => {
+          p.x = d.checkpointX;
+          p.y = this.groundAt(p.x);
+          p.vx = 0;
+          p.vy = 0;
+          p.invuln = 1;
+          this.snapCamera();
+        });
+      }
+    }
 
     // vitals
     this.nearFire =
@@ -566,13 +680,7 @@ export class Game {
     // camera
     const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, Math.max(0, this.lvl.w - this.W));
     this.camX += (targetX - this.camX) * Math.min(1, dt * 4);
-    if (this.scene === "dungeon") {
-      this.camY = DUNGEON_FLOOR + 38 - this.H;
-    } else {
-      const maxY = this.groundAt(p.x) + 38 - this.H;
-      const targetY = Math.min(p.y - this.H * 0.64, maxY);
-      this.camY += (targetY - this.camY) * Math.min(1, dt * 3);
-    }
+    this.camY += (this.cameraTargetY() - this.camY) * Math.min(1, dt * 3);
     this.shakeT -= dt;
   }
 
@@ -724,7 +832,9 @@ export class Game {
       if (g.open && g.openT < 1) g.openT = Math.min(1, g.openT + dt * 0.9);
     }
     if (Math.random() < dt * 3) {
-      this.spawn({ x: this.camX + Math.random() * this.W, y: DUNGEON_CEIL + 20 + Math.random() * 120, vx: (Math.random() - 0.5) * 4, vy: -2, life: 4 + Math.random() * 3, color: "#a8fff0", size: 1, grav: 0, kind: "firefly" });
+      const fx = this.camX + Math.random() * this.W;
+      const top = ceilAt(d, fx);
+      this.spawn({ x: fx, y: top + 10 + Math.random() * Math.max(10, floorAt(d, fx) - top - 20), vx: (Math.random() - 0.5) * 4, vy: -2, life: 4 + Math.random() * 3, color: "#a8fff0", size: 1, grav: 0, kind: "firefly" });
     }
   }
 
@@ -764,7 +874,7 @@ export class Game {
     this.shakeT = 0.3;
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2;
-      this.spawn({ x: d.shrineX, y: DUNGEON_FLOOR - 24, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60, life: 1.2, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
+      this.spawn({ x: d.shrineX, y: floorAt(d, d.shrineX) - 24, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60, life: 1.2, color: i % 2 ? "#e8f78a" : "#9fe0c0", size: 1, grav: 0, kind: "star" });
     }
     this.banner = { title: "Double jump!", sub: `Press ${this.labels.jump} again in mid-air`, t: 5 };
     this.talking = {
