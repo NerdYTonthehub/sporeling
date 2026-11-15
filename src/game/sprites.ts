@@ -342,3 +342,241 @@ export function drawFlyer(ctx: Ctx, x: number, y: number, facing: number, flap: 
   rect(ctx, diving ? "#ff5a3a" : "#e9dcc4", x + f * 6, y - 1, 1, 1);
   rect(ctx, "#0d1110", x + f * 7, y - 4, 1, 2);
 }
+
+/** A treetop snail villager. (x, y) = bottom of its foot. */
+export function drawSnail(ctx: Ctx, x: number, y: number, o: { facing: number; shell: string; scale?: number; t: number; moving: boolean; blink?: boolean }) {
+  const f = o.facing >= 0 ? 1 : -1;
+  const s = o.scale ?? 1;
+  const r = Math.max(5, Math.round(7 * s));
+  const stretch = o.moving ? Math.round((Math.sin(o.t * 6) + 1) * 0.8) : 0;
+  const bodyL = Math.round(9 * s);
+  const bodyR = Math.round(9 * s) + stretch;
+  const X = (dx: number, w = 1) => (f > 0 ? x + dx : x - dx - w + 1);
+  const R = (dx: number, dy: number, w: number, h: number, c: string) => rect(ctx, c, X(dx, w), y + dy, w, h);
+  const SKIN = "#d9c9a0";
+  const SKIN_SH = "#b8a47a";
+  // foot
+  R(-bodyL - 1, -5, bodyL + bodyR + 2, 5, OUTLINE);
+  R(-bodyL, -4, bodyL + bodyR, 4, SKIN);
+  R(-bodyL, -1, bodyL + bodyR, 1, SKIN_SH);
+  R(-bodyL - 2, -2, 2, 2, OUTLINE);
+  R(-bodyL - 1, -2, 1, 1, SKIN);
+  // head + neck
+  const hx = bodyR - 4;
+  R(hx - 1, -12, 6, 9, OUTLINE);
+  R(hx, -11, 4, 8, SKIN);
+  R(hx + 3, -11, 1, 8, SKIN_SH);
+  // eye stalks
+  const wob = Math.round(Math.sin(o.t * 2.3 + x) * 0.8);
+  for (const [sx, len] of [[hx, 6], [hx + 3, 5]] as const) {
+    R(sx, -11 - len, 1, len, SKIN_SH);
+    R(sx - 1 + wob, -13 - len, 3, 3, OUTLINE);
+    if (!o.blink) R(sx + wob, -12 - len, 1, 1, "#ffffff");
+  }
+  R(hx + 2, -6, 1, 1, "#ec9a8c");
+  R(hx + 1, -5, 2, 1, OUTLINE);
+  // shell (spiral) on its back
+  const cx = X(-2);
+  const cy = y - 4 - r;
+  ctx.fillStyle = OUTLINE;
+  fillCircle(ctx, cx, cy, r + 1);
+  ctx.fillStyle = o.shell;
+  fillCircle(ctx, cx, cy, r);
+  ctx.fillStyle = shade(o.shell, 0.72);
+  for (let dy = 0; dy <= r; dy++) {
+    const w = Math.floor(Math.sqrt(r * r - dy * dy));
+    ctx.fillRect(cx - w, cy + dy, w * 2 + 1, 1);
+  }
+  ctx.fillStyle = o.shell;
+  fillCircle(ctx, cx, cy - 1, r - 2);
+  ctx.fillStyle = shade(o.shell, 0.55);
+  for (let a = 0; a < Math.PI * 4.2; a += 0.22) {
+    const rr = 0.6 + a * (r - 1.5) / (Math.PI * 4.2);
+    ctx.fillRect(Math.round(cx + Math.cos(a) * rr * f), Math.round(cy + Math.sin(a) * rr), 1, 1);
+  }
+  rect(ctx, shade(o.shell, 1.45), cx - Math.round(r * 0.5), cy - r + 2, 2, 1);
+  rect(ctx, shade(o.shell, 1.3), cx - Math.round(r * 0.7), cy - r + 3, 1, 2);
+}
+
+/** A giant snail shell turned into a house; (sx, gy) = door bottom-centre. */
+export function drawShellHouse(ctx: Ctx, h: House, sx: number, gy: number, night: number) {
+  const r = Math.round(h.capW / 2) + 4;
+  const cx = sx + Math.round(r * 0.15);
+  const cy = gy - r + 2;
+  ctx.fillStyle = OUTLINE;
+  fillCircle(ctx, cx, cy, r + 1);
+  ctx.fillStyle = shade(h.cap, 0.75);
+  fillCircle(ctx, cx, cy, r);
+  ctx.fillStyle = h.cap;
+  fillCircle(ctx, cx - 1, cy - 1, r - 2);
+  // spiral bands
+  for (let a = 0; a < Math.PI * 5; a += 0.08) {
+    const rr = 1 + (a * (r - 2)) / (Math.PI * 5);
+    const px = Math.round(cx + Math.cos(a) * rr);
+    const py = Math.round(cy + Math.sin(a) * rr);
+    rect(ctx, shade(h.cap, 0.55), px, py, 1, 1);
+    if (a % 0.5 < 0.09) rect(ctx, shade(h.cap, 1.25), px + 1, py - 1, 1, 1);
+  }
+  rect(ctx, shade(h.cap, 1.5), cx - Math.round(r * 0.55), cy - r + 3, 3, 1);
+  rect(ctx, shade(h.cap, 1.35), cx - Math.round(r * 0.75), cy - r + 5, 1, 3);
+  // flat base where it rests on the deck
+  rect(ctx, OUTLINE, cx - r, gy - 1, r * 2, 1);
+  // round window
+  const wx = cx + Math.round(r * 0.45);
+  const wy = cy - Math.round(r * 0.3);
+  ctx.fillStyle = OUTLINE;
+  fillCircle(ctx, wx, wy, 3);
+  ctx.fillStyle = night > 0.3 ? "#ffd56a" : "#d9b45a";
+  fillCircle(ctx, wx, wy, 2);
+  rect(ctx, "#6a4429", wx, wy - 2, 1, 5);
+  // arched door
+  const dx = Math.round(sx - 3);
+  rect(ctx, OUTLINE, dx - 1, gy - 12, 8, 12);
+  rect(ctx, "#6a4429", dx, gy - 10, 6, 10);
+  rect(ctx, "#6a4429", dx + 1, gy - 11, 4, 1);
+  rect(ctx, "#4a2e1b", dx + 3, gy - 10, 1, 10);
+  rect(ctx, "#e6b84c", dx + 4, gy - 5, 1, 1);
+  rect(ctx, "#8a7a62", dx - 2, gy - 1, 10, 1);
+  // tiny chimney
+  rect(ctx, OUTLINE, cx - Math.round(r * 0.3) - 1, cy - r - 4, 5, 5);
+  rect(ctx, "#7d7a70", cx - Math.round(r * 0.3), cy - r - 3, 3, 4);
+}
+
+export interface KingOpts {
+  facing: number;
+  walk: number;
+  t: number;
+  angry: boolean;
+  mode: string;
+  flash: boolean;
+}
+
+/** The Beetle King: a crowned rhinoceros beetle with an armoured, gold-trimmed shell. (x, y) = feet. */
+export function drawBeetleKing(ctx: Ctx, x: number, y: number, o: KingOpts) {
+  const f = o.facing >= 0 ? 1 : -1;
+  const shake = o.mode === "windup" ? (Math.floor(o.t * 30) % 2 ? 1 : -1) : 0;
+  x += shake;
+  const X = (dx: number, w: number) => (f > 0 ? x + dx : x - dx - w);
+  const R = (dx: number, dy: number, w: number, h: number, c: string) => rect(ctx, o.flash ? "#ffffff" : c, X(dx, w), y + dy, w, h);
+  const DARK = "#0d1110";
+  const SHELL = o.angry ? "#3a1f3b" : "#1f2e3b";
+  const SHELL_L = o.angry ? "#6a3a5e" : "#3c5a72";
+  const SHELL_H = o.angry ? "#c87aa8" : "#8fc4dc";
+  const GOLD = "#f2c84b";
+  const GOLD_D = "#b8862a";
+  const stepA = o.mode === "stun" ? 0 : Math.round(Math.sin(o.walk * 9) * 2);
+  // legs (far side, darker)
+  for (const lx of [-14, -3, 8]) {
+    const k = lx === -3 ? -stepA : stepA;
+    R(lx + k + 1, -10, 2, 5, "#1a1f22");
+    R(lx + k + 2, -6, 2, 6, "#1a1f22");
+  }
+  // shell dome
+  const top = -34;
+  const bottom = -9;
+  const cxo = -6;
+  const half = 16;
+  for (let r = top; r <= bottom; r++) {
+    const k = (r - bottom) / (bottom - top);
+    const w = Math.round(half * Math.sqrt(Math.max(0, 1 - k * k)));
+    R(cxo - w - 1, r - 1, w * 2 + 2, 3, DARK);
+  }
+  for (let r = top; r <= bottom; r++) {
+    const k = (r - bottom) / (bottom - top);
+    const w = Math.round(half * Math.sqrt(Math.max(0, 1 - k * k)));
+    if (w <= 0) continue;
+    R(cxo - w, r, w * 2, 1, SHELL);
+    R(cxo - w, r, Math.max(1, Math.round(w * 0.45)), 1, SHELL_L);
+    if ((r - top) % 7 === 6) R(cxo - w + 1, r, w * 2 - 2, 1, DARK);
+  }
+  // gold trim along the shell edge and the centre seam
+  R(cxo - half, bottom - 1, half * 2, 2, GOLD);
+  R(cxo - half, bottom, half * 2, 1, GOLD_D);
+  R(cxo, top + 1, 1, bottom - top - 2, GOLD_D);
+  R(cxo - 1, top + 1, 1, bottom - top - 2, GOLD);
+  // iridescent highlights and rivets
+  R(cxo - 10, top + 6, 4, 1, SHELL_H);
+  R(cxo - 12, top + 8, 2, 2, SHELL_H);
+  R(cxo - 6, top + 4, 2, 1, "#ffffff");
+  for (const [rx, ry] of [[-17, -14], [-12, -20], [-1, -24], [5, -18]] as const) R(rx, ry, 1, 1, GOLD);
+  // thorax
+  R(7, -25, 11, 17, DARK);
+  R(8, -24, 9, 15, SHELL);
+  R(8, -24, 9, 2, SHELL_L);
+  R(8, -11, 9, 1, GOLD);
+  R(12, -30, 3, 7, DARK); // small thorax horn
+  R(13, -29, 1, 5, SHELL_L);
+  // head
+  R(16, -19, 9, 11, DARK);
+  R(17, -18, 7, 9, SHELL);
+  R(17, -18, 7, 1, SHELL_L);
+  // great horn curving up from the snout
+  const horn: [number, number, number, number][] = [[22, -16, 5, 4], [25, -20, 4, 5], [27, -25, 3, 6], [28, -31, 3, 7], [27, -34, 2, 4]];
+  for (const [hx, hy, w, h] of horn) R(hx - 1, hy - 1, w + 2, h + 2, DARK);
+  for (const [hx, hy, w, h] of horn) R(hx, hy, w, h, SHELL);
+  R(28, -30, 1, 6, SHELL_L);
+  R(27, -34, 2, 2, "#dfe8ec");
+  // eyes
+  const eye = o.angry || o.mode === "windup" ? (Math.floor(o.t * 8) % 2 ? "#ff5a3a" : "#ffb36a") : "#e9dcc4";
+  R(21, -16, 2, 2, eye);
+  R(21, -16, 1, 1, "#ffffff");
+  // mandibles
+  const chomp = Math.floor(o.t * 4) % 2;
+  R(23, -9 - chomp, 4, 1, "#c8b89a");
+  R(26, -10 - chomp, 1, 2, "#c8b89a");
+  R(23, -7 + chomp, 3, 1, "#a89878");
+  // legs (near side)
+  for (const lx of [-12, -1, 10]) {
+    const k = lx === -1 ? stepA : -stepA;
+    R(lx - 1, -12, 4, 5, DARK);
+    R(lx, -11, 2, 4, "#2a3a36");
+    R(lx + k - 1, -7, 3, 7, DARK);
+    R(lx + k, -7, 1, 6, "#2a3a36");
+    R(lx + k - 2, -1, 4, 1, DARK);
+  }
+  // crown
+  R(-4, -40, 14, 7, DARK);
+  R(-3, -37, 12, 3, GOLD);
+  R(-3, -35, 12, 1, GOLD_D);
+  for (const cx of [-3, 2, 7]) {
+    R(cx - 1, -44, 4, 5, DARK);
+    R(cx, -43, 2, 4, GOLD);
+  }
+  R(2, -44, 2, 1, "#fff3a0");
+  R(2, -36, 2, 1, "#e0362c");
+  R(-2, -36, 1, 1, "#5fd6c4");
+  R(7, -36, 1, 1, "#5fd6c4");
+  // stunned stars
+  if (o.mode === "stun") {
+    for (let i = 0; i < 3; i++) {
+      const a = o.t * 5 + (i * Math.PI * 2) / 3;
+      rect(ctx, "#fff3a0", Math.round(x + Math.cos(a) * 12), Math.round(y - 50 + Math.sin(a) * 3), 2, 2);
+    }
+  }
+}
+
+/** A wooden sword held at (hx, hy), pointing along angle `a` (radians). */
+export function drawSword(ctx: Ctx, hx: number, hy: number, a: number) {
+  const L = 13;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const px = -sa;
+  const py = ca;
+  const pts: [number, number, string][] = [];
+  for (let i = -2; i <= L; i++) {
+    const x = hx + ca * i;
+    const y = hy + sa * i;
+    if (i < 1) pts.push([x, y, "#5a3c26"]);
+    else if (i === 1) for (let k = -3; k <= 3; k++) pts.push([x + px * k, y + py * k, "#7a5536"]);
+    else {
+      pts.push([x, y, i === L ? "#f3dfae" : "#c9a56a"]);
+      if (i < L) pts.push([x + px, y + py, "#e8cf9a"]);
+    }
+  }
+  ctx.fillStyle = OUTLINE;
+  for (const [x, y] of pts) ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
+  for (const [x, y, c] of pts) {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  }
+}
