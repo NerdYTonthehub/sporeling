@@ -932,7 +932,7 @@ export class Game {
       b.hitT = 0.5;
       const away = Math.sign(b.x - this.p.x) || 1;
       b.x = clamp(b.x + away * 8, b.minX, b.maxX);
-      b.vx = away * Math.abs(b.vx || 30);
+      if (!b.big) b.vx = away * Math.abs(b.vx || 30);
       this.shakeT = 0.15;
       sfx.bossHit();
       this.bits(b.x, b.y - 10, 6, "#1f2e2b", "#f2c84b");
@@ -1520,7 +1520,7 @@ export class Game {
       coinPop: this.coinPop ? { amount: this.coinPop.amount, id: this.coinPop.id } : null,
       scene: this.scene,
       doubleJump: this.hasDoubleJump,
-      boss: boss && p.x > BOSS_ARENA_X ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
+      boss: boss && this.dungeon && p.x > this.dungeon.bossArenaX ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
     });
   }
 
@@ -1545,21 +1545,23 @@ export class Game {
     const cx = Math.round(this.camX);
     const cy = Math.round(this.camY);
     drawDungeonBack(ctx, d, cx, cy, this.W, this.H, this.time);
-    drawDoorway(ctx, d.entryX, cx, cy, this.darkness() > 0.5);
-    drawDoorway(ctx, d.exitX, cx, cy, this.darkness() > 0.5);
+    drawDoorway(ctx, d, d.entryX, cx, cy, this.darkness() > 0.5);
+    drawDoorway(ctx, d, d.exitX, cx, cy, this.darkness() > 0.5);
     for (const pl of d.platforms) this.drawPlatform(pl, cx, cy);
     drawDungeonFloor(ctx, d, cx, cy, this.W, this.H);
-    for (const g of d.glowcaps) drawGlowcap(ctx, g, cx, cy);
+    for (const g of d.glowcaps) drawGlowcap(ctx, d, g, cx, cy);
     drawShrine(ctx, d, cx, cy, this.time);
     this.drawEnemies(cx, cy);
+    this.drawShockwaves(cx, cy);
     const p = this.p;
     if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
       drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), { facing: p.facing, walk: p.walkT, moving: Math.abs(p.vx) > 4, air: !p.onGround, cap: "#d9443a", spots: true, scale: 1, blink: this.dead || p.blinkT < 0 });
     }
     this.drawAttack(cx, cy);
     this.drawParticles(cx, cy, false);
+    for (const g of d.gates) drawGate(ctx, d, g, cx, cy, this.time);
+    drawDungeonLights(ctx, d, cx, cy, this.W, this.H, this.time, Math.round(p.x - cx), Math.round(p.y - cy));
     this.drawParticles(cx, cy, true);
-    for (const g of d.gates) drawGate(ctx, g, cx, cy, this.time);
   }
 
   private drawEnemies(cx: number, cy: number) {
