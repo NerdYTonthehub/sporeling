@@ -124,6 +124,12 @@ export interface Beetle {
   big?: boolean;
   hitT?: number;
   chargeT?: number;
+  /** Beetle King AI state */
+  mode?: "walk" | "windup" | "charge" | "stun" | "leap";
+  timer?: number;
+  /** height above the floor while leaping, and vertical speed */
+  lift?: number;
+  vy?: number;
 }
 
 export interface Puddle {
