@@ -32,11 +32,11 @@ const count = (v: unknown) => Math.floor(num(v, 0, 1e9, 0));
 
 export function parseSave(raw: string | null): SaveData | null {
   if (!raw) return null;
-  let o: Record<string, unknown>;
+  let o: { [K in keyof SaveData]?: unknown };
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
-    o = parsed as Record<string, unknown>;
+    o = parsed as { [K in keyof SaveData]?: unknown };
   } catch {
     return null;
   }
