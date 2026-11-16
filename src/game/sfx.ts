@@ -77,6 +77,10 @@ export const sfx = {
   door: () => tone(220, 0.15, "triangle", 0.05, 80),
   menu: () => tone(660, 0.05, "square", 0.03),
   puff: () => tone(240, 0.12, "triangle", 0.05, -140),
+  swing: () => {
+    tone(900, 0.09, "triangle", 0.035, -600);
+    tone(300, 0.06, "square", 0.02, -120, 0.03);
+  },
   djump: () => {
     tone(520, 0.08, "square", 0.03, 300);
     tone(880, 0.1, "triangle", 0.03, 200, 0.05);
