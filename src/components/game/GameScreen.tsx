@@ -71,7 +71,7 @@ export function GameScreen() {
       playMusic(null);
       return;
     }
-    playMusic(hud?.scene === "dungeon" ? "dungeon" : "forest");
+    playMusic(hud?.scene === "dungeon" ? "dungeon" : hud?.scene === "heaven" ? "heaven" : "forest");
   }, [started, hud?.dead, hud?.scene]);
 
   useEffect(() => {
@@ -313,7 +313,7 @@ export function GameScreen() {
                   <span>+{hud.coinPop.amount}</span>
                 </div>
               )}
-              {hud.boss && <div className="pixel-panel absolute bottom-14 left-1/2 w-[min(80%,320px)] -translate-x-1/2 px-4 py-2 text-center"><div className="mb-2 font-display text-xs text-accent">Beetle King</div><div className="flex gap-1">{Array.from({ length: hud.boss.max }, (_, i) => <div key={i} className={`h-3 flex-1 ${i < (hud.boss?.hp ?? 0) ? "bg-health" : "bg-health-dim"}`} />)}</div></div>}
+              {hud.boss && <div className="pixel-panel absolute bottom-14 left-1/2 w-[min(80%,320px)] -translate-x-1/2 px-4 py-2 text-center"><div className="mb-2 font-display text-xs text-accent">{hud.boss.name}</div><div className="flex gap-1">{Array.from({ length: hud.boss.max }, (_, i) => <div key={i} className={`h-3 flex-1 ${i < (hud.boss?.hp ?? 0) ? "bg-health" : "bg-health-dim"}`} />)}</div></div>}
 
               {/* Village banner */}
               {hud.banner && !hud.dialog && !hud.dead && (

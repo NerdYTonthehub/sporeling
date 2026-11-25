@@ -24,6 +24,9 @@ export interface SaveData {
   doubleJump: boolean;
   dungeonCleared: boolean;
   discovered: string[];
+  godDefeated?: boolean;
+  holyTries?: number;
+  sacrificedFish?: string[];
 }
 
 const num = (v: unknown, lo: number, hi: number, fallback: number) =>
@@ -48,6 +51,10 @@ export function parseSave(raw: string | null): SaveData | null {
       if (n > 0) inventory[f.id] = n;
     }
   }
+  const fishIds = new Set(FISH.map((f) => f.id));
+  const sacrificedFish = Array.isArray(o.sacrificedFish)
+    ? o.sacrificedFish.filter((id): id is string => typeof id === "string" && fishIds.has(id)).slice(-60)
+    : [];
   return {
     v: SAVE_VERSION,
     savedAt: num(o.savedAt, 0, 1e15, 0),
@@ -65,5 +72,8 @@ export function parseSave(raw: string | null): SaveData | null {
     doubleJump: o.doubleJump === true,
     dungeonCleared: o.dungeonCleared === true,
     discovered: Array.isArray(o.discovered) ? o.discovered.filter((n): n is string => typeof n === "string") : [],
+    godDefeated: o.godDefeated === true,
+    holyTries: Math.floor(num(o.holyTries, 0, 3, 0)),
+    sacrificedFish,
   };
 }

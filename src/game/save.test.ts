@@ -18,6 +18,9 @@ const sample: SaveData = {
   doubleJump: true,
   dungeonCleared: true,
   discovered: ["Mossbottom", "Gillhollow"],
+  godDefeated: false,
+  holyTries: 1,
+  sacrificedFish: ["minnow", "carp"],
 };
 
 describe("save games", () => {
@@ -38,6 +41,13 @@ describe("save games", () => {
     const s = parseSave(JSON.stringify({ ...sample, coins: -5, inventory: { minnow: 3, dragon: 4, carp: -1 } }));
     expect(s?.coins).toBe(0);
     expect(s?.inventory).toEqual({ minnow: 3 });
+  });
+  it("defaults heaven progress fields on older saves", () => {
+    const { godDefeated: _g, holyTries: _h, sacrificedFish: _s, ...legacy } = sample;
+    const parsed = parseSave(JSON.stringify(legacy));
+    expect(parsed?.godDefeated).toBe(false);
+    expect(parsed?.holyTries).toBe(0);
+    expect(parsed?.sacrificedFish).toEqual([]);
   });
   it("autosaves every 30 seconds", () => {
     expect(AUTOSAVE_SECONDS).toBe(30);
