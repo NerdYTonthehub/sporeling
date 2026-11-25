@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { TOTAL_VILLAGES, generateWorld, surfaceY } from "./world";
+import { BOAT_FARE, LIGHTHOUSE_X, TOTAL_VILLAGES, generateAntShore, generateWorld, puddleSinkDepth, surfaceY } from "./world";
 import { createDungeon } from "./dungeon";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, moveInRoom } from "./interior";
 import { sectionCleared } from "./combat";
 
 describe("forest exploration", () => {
-  it("has exactly two ground-level and two treetop villages", () => {
+  it("has exactly two ground-level and two treetop villages, each with a campfire for teleporting", () => {
     const { world } = generateWorld(1337);
     expect(world.villages.filter((v) => v.floorY === undefined)).toHaveLength(2);
     expect(world.villages.filter((v) => v.floorY !== undefined)).toHaveLength(2);
     expect(world.villages).toHaveLength(TOTAL_VILLAGES);
+    for (const v of world.villages) {
+      expect(v.fireX).toBeGreaterThanOrEqual(v.x - v.half + 16);
+      expect(v.fireX).toBeLessThanOrEqual(v.x + v.half - 16);
+      if (v.floorY !== undefined) {
+        const deck = world.platforms.find((pl) => pl.kind === "deck" && Math.abs(pl.y - v.floorY!) <= 1 && v.fireX - 16 >= pl.x && v.fireX + 16 <= pl.x + pl.w);
+        expect(deck).toBeDefined();
+      }
+    }
   });
   it("places the dungeon entrance randomly on any ground-level tree", () => {
     const { world: wDefault } = generateWorld(1337);
@@ -30,6 +38,20 @@ describe("forest exploration", () => {
     const sampleXs = [1500, 3000, 6000, 9000, 12000, 15000];
     const diffs = sampleXs.filter((x) => a.groundY(x) !== b.groundY(x));
     expect(diffs.length).toBeGreaterThan(2);
+  });
+  it("sinks the player slightly when standing in a puddle", () => {
+    const puddles = [{ x: 2000, half: 16 }];
+    expect(puddleSinkDepth(puddles, 2000)).toBe(3);
+    expect(puddleSinkDepth(puddles, 2010)).toBeGreaterThan(0);
+    expect(puddleSinkDepth(puddles, 2030)).toBe(0);
+  });
+  it("builds a lighthouse by the shore and an ant-infested dead-grass shore across the 100-coin boat crossing", () => {
+    expect(BOAT_FARE).toBe(100);
+    expect(LIGHTHOUSE_X).toBeGreaterThan(820);
+    const shore = generateAntShore(1337);
+    expect(shore.anthills.length).toBeGreaterThanOrEqual(7);
+    expect(shore.ants.length).toBeGreaterThanOrEqual(20);
+    expect(shore.decor.some((d) => d.kind === "deadgrass")).toBe(true);
   });
   it("rope bridges join every neighboring tree's decks", () => {
     const { world } = generateWorld(1337);

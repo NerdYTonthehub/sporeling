@@ -918,3 +918,157 @@ export function drawFishBomb(ctx: Ctx, x: number, y: number, vx: number, vy: num
   rect(ctx, "#fff8c4", Math.round(x + 7), Math.round(y - 5 - bob), 1, 1);
   rect(ctx, "#ffe46b", Math.round(x - 5), Math.round(y + 6 + bob), 1, 1);
 }
+
+/** Red-and-white striped coastal lighthouse standing on the lake shore. (x, gy) = base center. */
+export function drawLighthouse(ctx: Ctx, x: number, gy: number, t: number, night: number) {
+  // Stone foundation
+  rect(ctx, OUTLINE, x - 16, gy - 7, 32, 7);
+  rect(ctx, "#6b6559", x - 15, gy - 6, 30, 6);
+  rect(ctx, "#8d887c", x - 15, gy - 6, 30, 2);
+
+  // Tapered striped tower (7 bands alternating white & red)
+  const bands: [number, number, number, string, string][] = [
+    [-15, 22, 8, "#f0eadc", "#cfc5b2"],
+    [-23, 20, 8, "#c8382c", "#96241b"],
+    [-31, 18, 8, "#f0eadc", "#cfc5b2"],
+    [-39, 16, 8, "#c8382c", "#96241b"],
+    [-47, 14, 8, "#f0eadc", "#cfc5b2"],
+    [-55, 14, 8, "#c8382c", "#96241b"],
+  ];
+  for (const [dy, w, h, col, sh] of bands) {
+    const lx = x - Math.round(w / 2);
+    rect(ctx, OUTLINE, lx - 1, gy + dy - 1, w + 2, h + 1);
+    rect(ctx, col, lx, gy + dy, w, h);
+    rect(ctx, sh, lx + w - Math.max(3, Math.round(w * 0.28)), gy + dy, Math.max(3, Math.round(w * 0.28)), h);
+  }
+
+  // Wooden door at ground base
+  rect(ctx, OUTLINE, x - 4, gy - 15, 8, 9);
+  rect(ctx, "#5a3c26", x - 3, gy - 14, 6, 8);
+  rect(ctx, "#8a6342", x - 2, gy - 13, 2, 6);
+  rect(ctx, "#f2c84b", x + 1, gy - 10, 1, 1);
+
+  // Small tower windows (lit warmly at dusk/night)
+  const winCol = night > 0.1 ? "#ffd56a" : "#3a5060";
+  for (const wy of [-27, -43]) {
+    rect(ctx, OUTLINE, x - 2, gy + wy, 4, 5);
+    rect(ctx, winCol, x - 1, gy + wy + 1, 2, 3);
+  }
+
+  // Balcony gallery & railing
+  rect(ctx, OUTLINE, x - 10, gy - 59, 20, 4);
+  rect(ctx, "#3a281c", x - 9, gy - 58, 18, 3);
+  rect(ctx, "#8d887c", x - 9, gy - 58, 18, 1);
+  for (let rx = -8; rx <= 8; rx += 4) rect(ctx, "#1b140f", x + rx, gy - 61, 1, 3);
+
+  // Glass lantern room + rotating golden lamp
+  rect(ctx, OUTLINE, x - 6, gy - 69, 12, 10);
+  rect(ctx, "#a8e6f0", x - 5, gy - 68, 10, 8);
+  const pulse = Math.sin(t * 2.2);
+  const lampX = x + Math.round(pulse * 2);
+  rect(ctx, "#fff6b8", lampX - 2, gy - 66, 5, 4);
+  rect(ctx, "#ffffff", lampX - 1, gy - 65, 3, 2);
+
+  // Red dome roof + spire
+  rect(ctx, OUTLINE, x - 7, gy - 73, 14, 4);
+  rect(ctx, "#c8382c", x - 6, gy - 72, 12, 3);
+  rect(ctx, "#96241b", x - 4, gy - 75, 8, 2);
+  rect(ctx, "#1b140f", x, gy - 78, 1, 4);
+}
+
+/** Wooden ferry boat docked on the lake water. (x, wy) = waterline center. */
+export function drawBoat(ctx: Ctx, x: number, wy: number, t: number, dir = -1) {
+  const bob = Math.round(Math.sin(t * 2.5));
+  const y = wy + bob;
+
+  // Hull
+  rect(ctx, OUTLINE, x - 14, y - 5, 28, 6);
+  rect(ctx, OUTLINE, x - 11, y + 1, 22, 2);
+  rect(ctx, "#5a3c26", x - 13, y - 4, 26, 4);
+  rect(ctx, "#8a6342", x - 12, y - 4, 24, 2);
+  rect(ctx, "#b38a54", x - 11, y - 4, 22, 1);
+  rect(ctx, "#3a281c", x - 10, y, 20, 2);
+  // Prow curl on bow side
+  const bowX = dir < 0 ? x - 15 : x + 13;
+  rect(ctx, OUTLINE, bowX, y - 7, 3, 3);
+  rect(ctx, "#8a6342", bowX + 1, y - 6, 1, 2);
+
+  // Small mast & furled cream sail + glowing bow lantern
+  rect(ctx, OUTLINE, x - 1, y - 22, 3, 18);
+  rect(ctx, "#7a5536", x, y - 21, 1, 17);
+  rect(ctx, OUTLINE, x + 1, y - 20, 7, 11);
+  rect(ctx, "#efe6d2", x + 2, y - 19, 5, 9);
+  rect(ctx, "#cfc5b2", x + 2, y - 12, 5, 2);
+
+  // Warm bow lantern
+  const lx = dir < 0 ? x - 10 : x + 9;
+  rect(ctx, OUTLINE, lx, y - 10, 3, 6);
+  rect(ctx, "#ffd56a", lx + 1, y - 9, 1, 3);
+  rect(ctx, "#fff8d0", lx + 1, y - 8, 1, 1);
+
+  // Gentle water ripple right beneath the hull
+  rect(ctx, "#cfe9f0", x - 12 + (Math.floor(t * 4) % 3), wy + 2, 5, 1);
+  rect(ctx, "#6fa3b8", x + 2 - (Math.floor(t * 4) % 3), wy + 2, 6, 1);
+}
+
+/** Earthy cone-shaped anthill mound on the far shore. (x, gy) = ground center. */
+export function drawAnthill(ctx: Ctx, x: number, gy: number, w: number, h: number) {
+  const half = Math.round(w / 2);
+  for (let row = 0; row < h; row++) {
+    const k = row / h;
+    const rw = Math.max(4, Math.round(w * (1 - k * 0.78)));
+    const rx = x - Math.round(rw / 2);
+    const ry = gy - row - 1;
+    rect(ctx, "#1b140f", rx - 1, ry, rw + 2, 1);
+    const col = k > 0.65 ? "#8b6440" : k > 0.3 ? "#6b4b2e" : "#4f3620";
+    rect(ctx, col, rx, ry, rw, 1);
+    rect(ctx, "#3d2917", rx + rw - Math.max(2, Math.round(rw * 0.25)), ry, Math.max(2, Math.round(rw * 0.25)), 1);
+  }
+  // Entrance tunnel hole at top & base
+  rect(ctx, "#1b140f", x - 2, gy - h, 4, 2);
+  rect(ctx, "#0e0a07", x - 1, gy - h, 2, 2);
+  rect(ctx, "#1b140f", x - Math.round(half * 0.35), gy - 5, 5, 5);
+  rect(ctx, "#0e0a07", x - Math.round(half * 0.35) + 1, gy - 4, 3, 4);
+  // Pine-needle / dirt speckles
+  rect(ctx, "#a88254", x - Math.round(half * 0.4), gy - Math.round(h * 0.45), 2, 1);
+  rect(ctx, "#a88254", x + Math.round(half * 0.25), gy - Math.round(h * 0.65), 2, 1);
+  rect(ctx, "#332214", x + 2, gy - Math.round(h * 0.28), 2, 1);
+}
+
+/** Scuttling worker or soldier ant. (x, y) = feet center. */
+export function drawAnt(ctx: Ctx, x: number, y: number, facing: number, t: number, soldier = false) {
+  const f = facing >= 0 ? 1 : -1;
+  const s = soldier ? 1.25 : 1;
+  const body = soldier ? "#7c1d18" : "#4a2018";
+  const hi = soldier ? "#b8382c" : "#783c2c";
+  const leg = Math.floor(t * 14) % 2;
+
+  // 6 scurrying legs
+  ctx.fillStyle = OUTLINE;
+  for (const lx of [-3, 0, 3]) {
+    const step = (lx === 0 ? leg : leg ^ 1) ? 1 : 0;
+    ctx.fillRect(Math.round(x + lx * s), y - 2 - step, 1, 2);
+  }
+
+  // Abdomen (back), Thorax (middle), Head (front)
+  const abX = Math.round(x - f * 4 * s) - 2;
+  const thX = Math.round(x) - 1;
+  const hdX = Math.round(x + f * 3 * s) - 1;
+  const abW = Math.round(4 * s);
+  const abH = Math.round(3 * s);
+
+  rect(ctx, OUTLINE, abX - 1, y - 5 - (soldier ? 1 : 0), abW + 2, abH + 2);
+  rect(ctx, OUTLINE, thX - 1, y - 4, 4, 3);
+  rect(ctx, OUTLINE, hdX - 1, y - 5, 4, 4);
+
+  rect(ctx, body, abX, y - 4 - (soldier ? 1 : 0), abW, abH);
+  rect(ctx, hi, abX, y - 4 - (soldier ? 1 : 0), Math.max(1, abW - 1), 1);
+  rect(ctx, body, thX, y - 3, 2, 2);
+  rect(ctx, hi, hdX, y - 4, 2, 2);
+
+  // Eye & mandibles & antennae
+  rect(ctx, soldier ? "#ffe46b" : "#f2efe0", hdX + (f > 0 ? 1 : 0), y - 4, 1, 1);
+  rect(ctx, OUTLINE, Math.round(x + f * (5 * s)), y - 6, 1, 2);
+  rect(ctx, OUTLINE, Math.round(x + f * (6 * s)), y - 7, 1, 1);
+  if (soldier) rect(ctx, "#e9dcc4", Math.round(x + f * 6), y - 3, 2, 1);
+}

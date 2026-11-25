@@ -1,5 +1,24 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
-import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
+import {
+  appleTreeGeom,
+  drawAnt,
+  drawAnthill,
+  drawAppleTree,
+  drawBeetle,
+  drawBeetleKing,
+  drawBoat,
+  drawFish,
+  drawFlyer,
+  drawHouse,
+  drawLighthouse,
+  drawLine,
+  drawMushroomPerson,
+  drawShellHouse,
+  drawSnail,
+  drawSword,
+  fillCircle,
+  rect,
+} from "./sprites";
 import {
   FISH,
   MAX_HOLY_TRIES,
@@ -51,16 +70,22 @@ import {
 import { SAVE_VERSION, type SaveData } from "./save";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, drawRoom, moveInRoom, nearbyFurn, type Room, type RoomPlayer } from "./interior";
 import {
+  BOAT_FARE,
   GROUND_BASE,
   LAKE_EDGE,
   LAKE_MIN_X,
   LAKE_Y,
+  LIGHTHOUSE_X,
   PIER_X0,
   WORLD_W,
+  generateAntShore,
   generateWorld,
   hash1,
   mulberry32,
+  puddleSinkDepth,
   surfaceY,
+  type Ant,
+  type AntShore,
   type Beetle,
   type GiantTree,
   type House,
@@ -79,17 +104,19 @@ const GRAVITY = 640;
 const JUMP_V = 220;
 const APPLE_REGROW = 25;
 const DAY_LENGTH = 240;
-const START_X = 960;
+const START_X = 885;
 const RELEASE_TIME = 3.6;
 const ROOM_SPEED = 46;
 const FADE = 0.5;
 /** Damage for falling into the dungeon's spike pit. */
 const PIT_DAMAGE = 15;
 const SHOCKWAVE_DAMAGE = 14;
+const ANT_DAMAGE = 10;
+const SOLDIER_ANT_DAMAGE = 15;
 const LAKE_FISHING_SPOT: Puddle = { x: LAKE_EDGE - 55, half: 55 };
 
 export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
-export type Scene = "forest" | "dungeon" | "room" | "heaven";
+export type Scene = "forest" | "dungeon" | "room" | "heaven" | "antshore";
 
 interface Level {
   w: number;
@@ -231,6 +258,9 @@ export class Game {
   private lakeHintT = 0;
   private heaven: HeavenState | null = null;
   private heavenLvl: Level | null = null;
+  private antShore: AntShore | null = null;
+  private antShoreLvl: Level | null = null;
+  private puddleSink = 0;
   private godDefeated = false;
   private holyTries = 0;
   private sacrificedFish: string[] = [];
@@ -262,6 +292,9 @@ export class Game {
     this.room = null;
     this.heaven = null;
     this.heavenLvl = null;
+    this.antShore = null;
+    this.antShoreLvl = null;
+    this.puddleSink = 0;
     this.p = {
       x: START_X,
       y: this.groundAt(START_X),
@@ -542,6 +575,7 @@ export class Game {
 
   private maxX() {
     if (this.scene === "heaven") return this.lvl.w - 10;
+    if (this.scene === "antshore" && this.antShore) return this.antShore.pier.x + this.antShore.pier.w - 6;
     if (this.scene === "dungeon" && this.dungeon) {
       const g = this.dungeon.gates.find((gt) => gt.openT < 0.6);
       if (g) return g.x - 9;
@@ -671,7 +705,7 @@ export class Game {
       p.vx = 0;
       p.vy = 0;
       p.onGround = true;
-      p.plat = null;
+      p.plat = this.villageDeck(this.sittingVillage);
       if (active && !this.fade && (this.keys.left || this.keys.right || this.pressed.has("jump") || this.pressed.has("up") || this.pressed.has("down"))) {
         this.standUp();
       }
@@ -686,6 +720,11 @@ export class Game {
       p.plat = null;
     }
     if (p.onGround && Math.abs(p.vx) > 4) p.walkT += dt * (Math.abs(p.vx) / MAX_SPEED);
+    const targetSink = this.scene === "forest" && p.onGround && !p.plat ? puddleSinkDepth(this.world.puddles, p.x) : 0;
+    this.puddleSink += (targetSink - this.puddleSink) * Math.min(1, dt * 18);
+    if (targetSink > 0 && Math.abs(p.vx) > 8 && Math.random() < dt * 14) {
+      this.spawn({ x: p.x + (Math.random() - 0.5) * 4, y: this.groundAt(p.x), vx: -p.facing * (8 + Math.random() * 14), vy: -14 - Math.random() * 16, life: 0.35, color: "#cfe9f0", size: 1, grav: 200, kind: "spark" });
+    }
     if (this.scene === "heaven" && Math.abs(p.vx) > 72 && Math.random() < dt * 18) {
       this.spawn({ x: p.x - p.facing * 4, y: p.y - 3 - Math.random() * 8, vx: -p.facing * 12, vy: -4, life: 0.25, color: "#fff6c4", size: 1, grav: 0, kind: "spark" });
     }
@@ -700,6 +739,19 @@ export class Game {
         p.vy = 0;
         this.snapCamera();
         this.showToast("Brrr! The lake is far too deep to swim.");
+      });
+    }
+    if (this.scene === "antshore" && this.antShore && p.x > this.antShore.lakeEdge && !p.plat && p.y >= LAKE_Y - 0.5 && active && !this.fade) {
+      const shore = this.antShore;
+      sfx.splash();
+      for (let i = 0; i < 12; i++) this.spawn({ x: p.x, y: LAKE_Y, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
+      this.transition(() => {
+        p.x = shore.lakeEdge - 40;
+        p.y = this.groundAt(p.x);
+        p.vx = 0;
+        p.vy = 0;
+        this.snapCamera();
+        this.showToast("Brrr! Too deep — take the boat back instead.");
       });
     }
     // fell into the spike pit: ouch, back to the start of the jumps
@@ -759,6 +811,7 @@ export class Game {
     if (this.scene === "forest") this.updateNpcs(dt);
     this.updateBeetles(dt, active);
     this.updateFlyers(dt, active);
+    if (this.scene === "antshore") this.updateAnts(dt, active);
     this.updateShockwaves(dt, active && this.mode !== "releasing" && !this.fade);
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
@@ -1019,6 +1072,15 @@ export class Game {
         this.hitFlyer(f);
       }
     }
+    if (this.scene === "antshore" && this.antShore) {
+      for (const a of this.antShore.ants) {
+        if (!a.alive || this.swingHits.has(a)) continue;
+        if (attackHits(p.x, p.y, p.facing, a.x, a.y - 3, a.soldier ? 7 : 5, 5)) {
+          this.swingHits.add(a);
+          this.hitAnt(a);
+        }
+      }
+    }
     if (this.scene === "heaven" && this.heaven) {
       const g = this.heaven.god;
       if (g.hp > 0 && g.hitT <= 0 && !this.swingHits.has(g)) {
@@ -1027,6 +1089,125 @@ export class Game {
         if (bodyHit || handHit) {
           this.swingHits.add(g);
           this.damageGod(1);
+        }
+      }
+    }
+  }
+
+  private enterAntShore() {
+    if (this.coins < BOAT_FARE) {
+      sfx.hurt();
+      this.showToast(`You need ${BOAT_FARE} coins for the boat fare!`);
+      return;
+    }
+    this.coins -= BOAT_FARE;
+    sfx.splash();
+    sfx.discover();
+    this.emitHud();
+    this.transition(() => {
+      this.returnPos = { x: Math.max(PIER_X0 + 18, this.p.x), y: this.p.y };
+      if (!this.antShore || !this.antShoreLvl) {
+        const shore = generateAntShore(this.worldSeed);
+        this.antShore = shore;
+        this.antShoreLvl = { w: shore.w, ground: shore.ground, platforms: shore.platforms, beetles: [], flyers: [] };
+      }
+      const shore = this.antShore;
+      this.lvl = this.antShoreLvl;
+      this.scene = "antshore";
+      this.talking = null;
+      this.puddleSink = 0;
+      const p = this.p;
+      p.x = shore.lakeEdge - 32;
+      p.y = this.groundAt(p.x);
+      p.vx = 0;
+      p.vy = 0;
+      p.plat = null;
+      p.facing = -1;
+      this.particles = [];
+      this.snapCamera();
+      this.banner = { title: "Across the Great Lake", sub: "Parched earth, dead grass & swarming anthills", t: 4 };
+    });
+  }
+
+  private exitAntShore() {
+    sfx.splash();
+    this.transition(() => {
+      this.scene = "forest";
+      this.lvl = this.forestLvl;
+      this.talking = null;
+      const p = this.p;
+      p.x = PIER_X0 + 20;
+      p.y = LAKE_Y - 8;
+      p.vx = 0;
+      p.vy = 0;
+      p.plat = this.world.pier;
+      p.onGround = true;
+      p.facing = 1;
+      this.particles = [];
+      this.snapCamera();
+      this.showToast("Welcome back to the lighthouse shore.");
+    });
+  }
+
+  private hitAnt(a: Ant) {
+    if (a.hitT > 0) return;
+    a.hp -= 1;
+    if (a.hp > 0) {
+      a.hitT = 0.35;
+      const away = Math.sign(a.x - this.p.x) || 1;
+      a.x = clamp(a.x + away * 7, a.minX, a.maxX);
+      a.vx = away * Math.abs(a.vx || 24);
+      sfx.bossHit();
+      this.bits(a.x, a.y - 4, 5, "#7c1d18", "#ffe46b");
+      return;
+    }
+    a.alive = false;
+    a.respawn = 28;
+    const reward = a.soldier ? 4 : 2;
+    this.coins += reward;
+    this.coinPopId++;
+    this.coinPop = { amount: reward, id: this.coinPopId, t: 0 };
+    sfx.stomp();
+    this.bits(a.x, a.y - 3, 7, a.soldier ? "#7c1d18" : "#4a2018", "#a88254");
+    this.emitHud();
+  }
+
+  private updateAnts(dt: number, active: boolean) {
+    const shore = this.antShore;
+    if (!shore) return;
+    const p = this.p;
+    const canFight = active && this.mode !== "releasing" && !this.fade;
+    for (const a of shore.ants) {
+      if (!a.alive) {
+        a.respawn -= dt;
+        if (a.respawn <= 0 && Math.abs(a.x - p.x) > this.W) {
+          a.alive = true;
+          a.hp = a.maxHp;
+          a.hitT = 0;
+        }
+        continue;
+      }
+      if (Math.abs(a.x - p.x) > this.W * 1.5) continue;
+      a.hitT = Math.max(0, a.hitT - dt);
+      a.x += a.vx * dt;
+      a.walkT += dt * 1.4;
+      if (a.x < a.minX) {
+        a.x = a.minX;
+        a.vx = Math.abs(a.vx);
+      } else if (a.x > a.maxX) {
+        a.x = a.maxX;
+        a.vx = -Math.abs(a.vx);
+      }
+      a.y = this.groundAt(a.x);
+      if (!canFight) continue;
+      const hitW = a.soldier ? 8 : 6;
+      if (Math.abs(a.x - p.x) < hitW && a.y - p.y < 14 && a.y - p.y > -6) {
+        if (p.vy > 20 && p.y <= a.y - 1) {
+          this.hitAnt(a);
+          p.vy = -185;
+          p.onGround = false;
+        } else if (p.invuln <= 0) {
+          this.hurt(a.soldier ? SOLDIER_ANT_DAMAGE : ANT_DAMAGE, a.x);
         }
       }
     }
@@ -1318,6 +1499,18 @@ export class Game {
     }
     const p = this.p;
     const A = this.labels.act;
+    if (this.scene === "antshore" && this.antShore) {
+      const atReturnBoat = p.onGround && p.plat?.kind === "pier" && p.x >= this.antShore.lakeEdge + 24;
+      if (this.talking) this.prompt = `${A} · next`;
+      else if (atReturnBoat) this.prompt = `${A} · sail back to the forest`;
+      else this.prompt = null;
+      if (this.pressed.has("act")) {
+        if (this.talking) this.advanceTalk();
+        else if (atReturnBoat) this.exitAntShore();
+        this.emitHud();
+      }
+      return;
+    }
     let nearNpc: Npc | null = null;
     let nd = 18;
     for (const v of this.world.villages) {
@@ -1341,10 +1534,12 @@ export class Game {
     const elder = this.world.elder;
     const ex = elder.x + elder.w / 2;
     const atElder = p.onGround && !p.plat && Math.abs(p.x - ex) < 14;
+    const atBoat = p.onGround && p.plat?.kind === "pier" && p.x <= PIER_X0 + 24;
+    const atLighthouse = p.onGround && !p.plat && Math.abs(p.x - LIGHTHOUSE_X) < 16;
     const tree = this.world.appleTrees.find(
       (t) => Math.abs(t.x - p.x) < 16 && Math.abs(this.groundAt(t.x) - p.y) < 30 && t.apples.some((a) => a.grown),
     );
-    const atLake = p.onGround && (p.plat?.kind === "pier" || (!p.plat && p.x <= LAKE_EDGE + 24));
+    const atLake = !atBoat && p.onGround && (p.plat?.kind === "pier" || (!p.plat && p.x <= LAKE_EDGE + 24));
     const puddle = atLake
       ? LAKE_FISHING_SPOT
       : p.onGround && !p.plat
@@ -1353,7 +1548,7 @@ export class Game {
     this.nearPuddle = puddle;
 
     let logSpot: { v: Village; x: number } | null = null;
-    if (p.onGround && !p.plat) {
+    if (p.onGround && (!p.plat || p.plat.kind === "deck")) {
       for (const v of this.world.villages) {
         if (Math.abs(p.y - this.villageFloor(v)) > 4) continue;
         for (const lx of [v.fireX - 16, v.fireX + 16]) {
@@ -1368,6 +1563,8 @@ export class Game {
     else if (nearNpc) this.prompt = `${A} · talk to ${nearNpc.name}`;
     else if (house) this.prompt = `${A} · go inside`;
     else if (atElder) this.prompt = this.hasDoubleJump ? `${A} · enter the Elder Tree (cleared)` : `${A} · enter the Elder Tree`;
+    else if (atBoat) this.prompt = `${A} · sail across the lake (${BOAT_FARE} coins)`;
+    else if (atLighthouse) this.prompt = `${A} · read lighthouse sign`;
     else if (logSpot) this.prompt = `Sit (${A})`;
     else if (tree) this.prompt = `${A} · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
     else if (puddle) {
@@ -1385,6 +1582,19 @@ export class Game {
         this.enterHouse(house.v, house.h);
       } else if (atElder) {
         this.enterDungeon();
+      } else if (atBoat) {
+        this.enterAntShore();
+      } else if (atLighthouse) {
+        this.talking = {
+          npc: null,
+          name: "Harbor Lighthouse",
+          lines: [
+            "\"Beacon of the Great Lake — guiding small sailors safely through the mist.\"",
+            `The ferryman's boat waits at the end of the wooden pier (${BOAT_FARE} coins for a crossing to the far shore).`,
+          ],
+          idx: 0,
+        };
+        sfx.talk();
       } else if (logSpot) {
         this.sitOnLog(logSpot.v, logSpot.x);
       } else if (tree) {
@@ -1410,15 +1620,22 @@ export class Game {
     }
   }
 
+  private villageDeck(v: Village): Platform | null {
+    if (v.floorY === undefined) return null;
+    const fy = v.floorY;
+    return this.world.platforms.find((pl) => pl.kind === "deck" && Math.abs(pl.y - fy) <= 1 && v.fireX >= pl.x && v.fireX <= pl.x + pl.w) ?? null;
+  }
+
   // ---------- campfire log sitting & village teleportation ----------
   private sitOnLog(v: Village, logX: number) {
     const p = this.p;
+    v.discovered = true;
     p.x = logX;
     p.y = this.villageFloor(v) - 3;
     p.vx = 0;
     p.vy = 0;
     p.facing = logX < v.fireX ? 1 : -1;
-    p.plat = null;
+    p.plat = this.villageDeck(v);
     p.onGround = true;
     this.mode = "sitting";
     this.sittingVillage = v;
@@ -1432,6 +1649,7 @@ export class Game {
     if (this.sittingVillage) {
       this.p.y = this.villageFloor(this.sittingVillage);
       this.p.vy = 0;
+      this.p.plat = this.villageDeck(this.sittingVillage);
       this.p.onGround = true;
     }
     this.mode = "walk";
@@ -1441,7 +1659,7 @@ export class Game {
 
   teleportToVillage(name: string) {
     const target = this.world.villages.find((v) => v.name === name);
-    if (!target || !this.running || this.dead || this.fade) return false;
+    if (!target || !target.discovered || !this.running || this.dead || this.fade) return false;
     sfx.discover();
     this.transition(() => {
       const p = this.p;
@@ -1453,7 +1671,7 @@ export class Game {
       p.vx = 0;
       p.vy = 0;
       p.facing = 1;
-      p.plat = null;
+      p.plat = this.villageDeck(target);
       p.onGround = true;
       target.discovered = true;
       this.snapCamera();
@@ -2103,7 +2321,7 @@ export class Game {
           ? {
               from: this.sittingVillage.name,
               destinations: this.world.villages
-                .filter((v) => v.name !== this.sittingVillage?.name)
+                .filter((v) => v.discovered && v.name !== this.sittingVillage?.name)
                 .map((v) => ({ name: v.name, treetop: v.floorY !== undefined, discovered: v.discovered })),
             }
           : null,
@@ -2119,6 +2337,8 @@ export class Game {
       this.renderDungeon(this.dungeon);
     } else if (this.scene === "heaven" && this.heaven) {
       this.renderHeaven(this.heaven);
+    } else if (this.scene === "antshore" && this.antShore) {
+      this.renderAntShore(this.antShore);
     } else {
       this.renderForest();
     }
@@ -2281,8 +2501,15 @@ export class Game {
     // play layer
     for (const t of this.world.trees) this.drawGiantTree(t, cx, cy);
     for (const pl of this.world.platforms) this.drawPlatform(pl, cx, cy);
+    if (LIGHTHOUSE_X - cx > -40 && LIGHTHOUSE_X - cx < W + 40) {
+      drawLighthouse(ctx, Math.round(LIGHTHOUSE_X - cx), Math.round(this.groundAt(LIGHTHOUSE_X) - cy), this.time, night);
+    }
     this.drawGround(cx, cy);
     for (const pd of this.world.puddles) this.drawPuddle(pd, cx, cy);
+    const boatX = PIER_X0 - 15;
+    if (boatX - cx > -30 && boatX - cx < W + 30) {
+      drawBoat(ctx, Math.round(boatX - cx), Math.round(LAKE_Y - cy), this.time, -1);
+    }
     for (const v of this.world.villages) this.drawVillage(v, cx, cy, night);
     for (const t of this.world.appleTrees) {
       const sx = t.x - cx;
@@ -2325,6 +2552,7 @@ export class Game {
 
     // player
     const p = this.p;
+    const sink = Math.round(this.puddleSink);
     const blinkHurt = p.invuln > 0 && Math.floor(this.time * 18) % 2 === 0;
     if (!blinkHurt) {
       const px = Math.round(p.x - cx);
@@ -2332,7 +2560,7 @@ export class Game {
       if (this.dead) {
         ctx.globalAlpha = 0.7;
       }
-      drawMushroomPerson(ctx, px, py, {
+      drawMushroomPerson(ctx, px, py + sink, {
         facing: p.facing,
         walk: p.walkT,
         moving: Math.abs(p.vx) > 4,
@@ -2346,6 +2574,12 @@ export class Game {
         attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
         fishing: this.mode === "fishing" && this.fishing ? { phase: this.fishing.phase, t: this.fishing.t } : undefined,
       });
+      if (sink > 0) {
+        // Water ripple across sunken boots
+        rect(ctx, "#4f86a0", px - 4, py, 9, 1);
+        rect(ctx, "#cfe9f0", px - 3 + (Math.floor(this.time * 6) % 2), py, 2, 1);
+        rect(ctx, "#cfe9f0", px + 2 - (Math.floor(this.time * 6) % 2), py, 2, 1);
+      }
       ctx.globalAlpha = 1;
     }
     this.drawFishingGear(cx, cy);
@@ -2365,6 +2599,169 @@ export class Game {
       ctx.fillRect(0, 0, W, H);
     }
     this.drawLights(cx, cy, night);
+  }
+
+  private renderAntShore(shore: AntShore) {
+    const ctx = this.ctx;
+    const W = this.W;
+    const H = this.H;
+    let cx = Math.round(this.camX);
+    let cy = Math.round(this.camY);
+    if (this.shakeT > 0) {
+      cx += Math.round((Math.random() - 0.5) * 3);
+      cy += Math.round((Math.random() - 0.5) * 3);
+    }
+    const night = this.darkness();
+
+    // Dusty ochre-amber sky over the dead far shore
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#2c231a");
+    grad.addColorStop(0.5, "#6b543b");
+    grad.addColorStop(1, "#c7ab7c");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Distant parched ridge + withered dead tree silhouettes
+    for (const [factor, spacing, col, groundCol, horizon] of [
+      [0.2, 90, "#5a4632", "#745c42", 26],
+      [0.45, 160, "#413122", "#523e2a", 12],
+    ] as const) {
+      const cam = cx * factor;
+      const baseY = Math.round(GROUND_BASE - horizon - cy * factor);
+      const i0 = Math.floor(cam / spacing) - 1;
+      const i1 = Math.ceil((cam + W) / spacing) + 1;
+      for (let i = i0; i <= i1; i++) {
+        if (hash1(i, factor * 100) < 0.35) continue;
+        const tx = Math.round(i * spacing + hash1(i, 7) * 40 - cam);
+        const h = 36 + Math.floor(hash1(i, 9) * 34);
+        rect(ctx, col, tx, baseY - h, 3, h);
+        rect(ctx, col, tx - 5, baseY - h + 6, 5, 2);
+        rect(ctx, col, tx + 3, baseY - h + 11, 6, 2);
+      }
+      ctx.fillStyle = groundCol;
+      for (let x = 0; x < W; x += 4) {
+        const wx = x + cam;
+        const y = baseY + Math.round(Math.sin(wx / 70 + horizon) * 4);
+        ctx.fillRect(x, y, 4, H - y);
+      }
+    }
+
+    // Anthills behind ground grass rim
+    for (const ah of shore.anthills) {
+      const sx = ah.x - cx;
+      if (sx < -40 || sx > W + 40) continue;
+      drawAnthill(ctx, Math.round(sx), Math.round(this.groundAt(ah.x) - cy), ah.w, ah.h);
+    }
+
+    // Pier on right edge + return ferry boat bobbing on water
+    this.drawPlatform(shore.pier, cx, cy);
+    const retBoatX = shore.pier.x + shore.pier.w + 15;
+    if (retBoatX - cx > -30 && retBoatX - cx < W + 30) {
+      drawBoat(ctx, Math.round(retBoatX - cx), Math.round(LAKE_Y - cy), this.time, 1);
+    }
+
+    // Cracked dry ground + Great Lake water on right
+    const tick = Math.floor(this.time * 2.5);
+    for (let x = 0; x < W; x++) {
+      const wx = cx + x;
+      const y = this.groundAt(wx) - cy;
+      if (y >= H) continue;
+      if (wx > shore.lakeEdge) {
+        rect(ctx, "#234a60", x, y, 1, H - y);
+        if (y + 5 < H) rect(ctx, "#183749", x, y + 5, 1, H - y - 5);
+        rect(ctx, "#4f86a0", x, y, 1, 2);
+        if (hash1(wx * 3, tick) < 0.09) rect(ctx, "#cfe9f0", x, y, 1, 1);
+        continue;
+      }
+      rect(ctx, "#3d2c1c", x, y, 1, H - y);
+      if (y + 12 < H) rect(ctx, "#2a1d12", x, y + 12, 1, H - y - 12);
+      if (wx > shore.lakeEdge - 24) {
+        rect(ctx, "#9e8658", x, y + 2, 1, 3);
+        rect(ctx, "#cbb483", x, y, 1, 2);
+      } else {
+        // Dead dry grass crust
+        rect(ctx, "#6d5832", x, y + 2, 1, 2);
+        rect(ctx, "#998047", x, y, 1, 2);
+        if (hash1(wx, 6) < 0.4) rect(ctx, "#baa25b", x, y, 1, 1);
+      }
+      if (hash1(wx, 15) < 0.07) rect(ctx, "#21150c", x, y + 6 + (wx % 12), 2, 1);
+    }
+
+    // Dead grass tufts, dry bushes, twigs & pebbles
+    for (const d of shore.decor) {
+      const sx = Math.round(d.x - cx);
+      if (sx < -8 || sx > W + 8) continue;
+      const gy = Math.round(this.groundAt(d.x) - cy);
+      if (d.kind === "deadgrass") {
+        const h = 3 + Math.floor(d.v * 4);
+        const col = d.c === 0 ? "#b89c54" : d.c === 1 ? "#8c7238" : "#a38744";
+        const lean = d.c % 2 ? 1 : -1;
+        rect(ctx, col, sx, gy - h + 1, 1, h - 1);
+        rect(ctx, col, sx + lean, gy - h, 1, 2);
+        rect(ctx, "#70592a", sx + 1, gy - 2, 1, 2);
+      } else if (d.kind === "drybush") {
+        rect(ctx, "#523e24", sx - 2, gy - 4, 5, 4);
+        rect(ctx, "#8c7238", sx - 3, gy - 5, 2, 2);
+        rect(ctx, "#a38744", sx + 2, gy - 6, 2, 2);
+        rect(ctx, "#6e5630", sx, gy - 7, 1, 3);
+      } else if (d.kind === "twig") {
+        rect(ctx, "#4a3320", sx, gy - 1, 4, 1);
+        rect(ctx, "#6e4e32", sx + 2, gy - 2, 2, 1);
+      } else {
+        rect(ctx, "#5e5347", sx, gy - 1, 3, 1);
+        rect(ctx, "#857868", sx + 1, gy - 2, 2, 1);
+      }
+    }
+
+    // Swarming worker & soldier ants
+    for (const a of shore.ants) {
+      if (!a.alive) continue;
+      const sx = Math.round(a.x - cx);
+      if (sx < -16 || sx > W + 16) continue;
+      if (a.hitT > 0 && Math.floor(this.time * 24) % 2 === 0) continue;
+      drawAnt(ctx, sx, Math.round(a.y - cy), Math.sign(a.vx), a.walkT, a.soldier);
+    }
+
+    // Player & combat
+    const p = this.p;
+    const blinkHurt = p.invuln > 0 && Math.floor(this.time * 18) % 2 === 0;
+    if (!blinkHurt) {
+      drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), {
+        facing: p.facing,
+        walk: p.walkT,
+        moving: Math.abs(p.vx) > 4,
+        air: !p.onGround,
+        cap: "#d9443a",
+        spots: true,
+        scale: 1,
+        blink: this.dead || p.blinkT < 0,
+        attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
+      });
+    }
+    this.drawAttack(cx, cy);
+    this.drawParticles(cx, cy, false);
+    this.drawParticles(cx, cy, true);
+
+    if (night > 0.01) {
+      ctx.fillStyle = `rgba(18,12,8,${(night * 0.6).toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    // Warm glow on the return ferry boat lantern
+    if (retBoatX - cx > -40 && retBoatX - cx < W + 40) {
+      ctx.globalCompositeOperation = "lighter";
+      const gx = Math.round(retBoatX + 9 - cx);
+      const gy = Math.round(LAKE_Y - 8 - cy);
+      const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, 24);
+      g.addColorStop(0, "rgba(255,215,105,0.45)");
+      g.addColorStop(1, "rgba(255,215,105,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(gx - 24, gy - 24, 48, 48);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    if (this.dead) {
+      ctx.fillStyle = "rgba(20,8,8,0.35)";
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   private drawTrunkLayer(
@@ -3013,6 +3410,30 @@ export class Game {
         }
       }
     }
+    // Lighthouse lantern & rotating beacon cone + harbor boat lantern
+    const lhx = Math.round(LIGHTHOUSE_X - cx);
+    const lhy = Math.round(this.groundAt(LIGHTHOUSE_X) - cy - 64);
+    if (lhx > -180 && lhx < this.W + 180) {
+      glow(lhx, lhy, 32, "255,220,120", 0.25 + night * 0.45);
+      const beamDir = Math.sin(this.time * 1.1);
+      if (Math.abs(beamDir) > 0.15) {
+        const reach = beamDir * 135;
+        const bg = ctx.createLinearGradient(lhx, lhy, lhx + reach, lhy + 12);
+        bg.addColorStop(0, `rgba(255,235,150,${(0.18 + night * 0.28).toFixed(3)})`);
+        bg.addColorStop(1, "rgba(255,235,150,0)");
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.moveTo(lhx, lhy - 2);
+        ctx.lineTo(lhx + reach, lhy - 18);
+        ctx.lineTo(lhx + reach, lhy + 22);
+        ctx.lineTo(lhx, lhy + 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    const boatLx = Math.round(PIER_X0 - 25 - cx);
+    glow(boatLx, Math.round(LAKE_Y - 8 - cy), 22, "255,210,105", 0.2 + night * 0.4);
+
     if (night > 0.05) {
       for (const d of this.world.decor) {
         if (d.kind !== "flower" || d.c !== 3) continue;

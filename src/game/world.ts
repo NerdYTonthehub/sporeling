@@ -9,6 +9,10 @@ export const LAKE_Y = GROUND_BASE + 12;
 /** A little pier sticks out over the water; this is as far left as you can go. */
 export const PIER_X0 = LAKE_EDGE - 70;
 export const LAKE_MIN_X = PIER_X0 + 6;
+/** Lighthouse standing on the lake shore beside the spawn & boat dock. */
+export const LIGHTHOUSE_X = LAKE_EDGE + 95;
+/** Boat fare to sail across the Great Lake to the ant-infested far shore. */
+export const BOAT_FARE = 100;
 
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -285,6 +289,14 @@ export function generateWorld(seed = 1337, doorIndex?: number): { world: World; 
       const sm = t * t * (3 - 2 * t);
       g = LAKE_Y * (1 - sm) + g * sm;
     }
+    const lhDist = Math.abs(x - LIGHTHOUSE_X);
+    if (lhDist < 36) {
+      const flatY = rawGround(LIGHTHOUSE_X);
+      if (lhDist < 18) return Math.round(flatY);
+      const t = (lhDist - 18) / 18;
+      const sm = t * t * (3 - 2 * t);
+      g = flatY * (1 - sm) + g * sm;
+    }
     for (const v of villageSpans) {
       const d = Math.abs(x - v.x);
       const flatY = rawGround(v.x);
@@ -510,17 +522,192 @@ export function generateWorld(seed = 1337, doorIndex?: number): { world: World; 
       r < 0.6 ? "grass" : r < 0.7 ? "flower" : r < 0.78 ? "clover" : r < 0.86 ? "pebble" : r < 0.92 ? "leaf" : "fern";
     const v = rnd();
     const c = Math.floor(rnd() * 4);
-    if (!nearPuddle(dx, 2) && dx > LAKE_EDGE + 4) decor.push({ x: dx, kind, v, c });
+    if (!nearPuddle(dx, 2) && dx > LAKE_EDGE + 4 && Math.abs(dx - LIGHTHOUSE_X) > 16) decor.push({ x: dx, kind, v, c });
   }
   const fgGrass: Decor[] = [];
   for (let dx = 0; dx < WORLD_W; dx += 30 + Math.floor(rnd() * 90)) {
     const v = rnd();
     const c = Math.floor(rnd() * 3);
-    if (!nearPuddle(dx, 4) && dx > LAKE_EDGE + 20) fgGrass.push({ x: dx, kind: "grass", v, c });
+    if (!nearPuddle(dx, 4) && dx > LAKE_EDGE + 20 && Math.abs(dx - LIGHTHOUSE_X) > 20) fgGrass.push({ x: dx, kind: "grass", v, c });
   }
 
   const pier: Platform = { x: PIER_X0, y: LAKE_Y - 8, w: LAKE_EDGE + 40 - PIER_X0, color: 0, kind: "pier" };
   platforms.push(pier);
 
   return { world: { pier, trees, elder, flyers, platforms, appleTrees, puddles, villages, beetles, decor, fgGrass }, groundY };
+}
+
+/** How many pixels deep (0..3) the player sinks when walking across a puddle. */
+export function puddleSinkDepth(puddles: Puddle[], x: number): number {
+  for (const pd of puddles) {
+    const dx = Math.abs(x - pd.x);
+    if (dx <= pd.half - 1) {
+      const k = dx / pd.half;
+      return Math.max(1, Math.round(3 * Math.sqrt(Math.max(0, 1 - k * k))));
+    }
+  }
+  return 0;
+}
+
+export const ANTSHORE_W = 2800;
+export const ANTSHORE_LAKE_EDGE = 2500;
+export const ANTSHORE_PIER_X0 = ANTSHORE_LAKE_EDGE - 30;
+export const ANTSHORE_PIER_W = 100;
+
+export interface Anthill {
+  x: number;
+  w: number;
+  h: number;
+}
+
+export interface Ant {
+  x: number;
+  y: number;
+  vx: number;
+  minX: number;
+  maxX: number;
+  alive: boolean;
+  respawn: number;
+  walkT: number;
+  hp: number;
+  maxHp: number;
+  hitT: number;
+  soldier?: boolean | undefined;
+}
+
+export interface DeadDecor {
+  x: number;
+  kind: "deadgrass" | "drybush" | "twig" | "pebble";
+  v: number;
+  c: number;
+}
+
+export interface AntShore {
+  w: number;
+  lakeEdge: number;
+  pier: Platform;
+  platforms: Platform[];
+  groundY: (x: number) => number;
+  ground: Int16Array;
+  anthills: Anthill[];
+  ants: Ant[];
+  decor: DeadDecor[];
+}
+
+export function generateAntShore(seed = 1337): AntShore {
+  const rnd = mulberry32((seed ^ 0x9e3779b9) >>> 0);
+  const rr = (a: number, b: number) => a + rnd() * (b - a);
+
+  const p1 = rr(0, Math.PI * 2);
+  const p2 = rr(0, Math.PI * 2);
+  const f1 = rr(160, 260);
+  const f2 = rr(65, 110);
+
+  const rawDryGround = (x: number) =>
+    GROUND_BASE - 2 + Math.sin(x / f1 + p1) * 8 + Math.cos(x / f2 + p2) * 5;
+
+  const anthills: Anthill[] = [];
+  let hx = 140;
+  while (hx < ANTSHORE_LAKE_EDGE - 220) {
+    const w = Math.round(rr(30, 48));
+    const h = Math.round(rr(16, 26));
+    anthills.push({ x: Math.round(hx), w, h });
+    hx += rr(175, 250);
+  }
+
+  const nearHill = (x: number, pad = 6) => anthills.some((ah) => Math.abs(x - ah.x) < ah.w / 2 + pad);
+
+  const groundY = (x: number) => {
+    if (x > ANTSHORE_LAKE_EDGE) return LAKE_Y;
+    let g = rawDryGround(x);
+    if (x > ANTSHORE_LAKE_EDGE - 70) {
+      const t = (ANTSHORE_LAKE_EDGE - x) / 70;
+      const sm = t * t * (3 - 2 * t);
+      g = LAKE_Y * (1 - sm) + g * sm;
+    }
+    for (const ah of anthills) {
+      const half = ah.w / 2;
+      const d = Math.abs(x - ah.x);
+      if (d > half + 18) continue;
+      const flatY = rawDryGround(ah.x);
+      if (d < half + 4) return Math.round(flatY);
+      const t = (d - half - 4) / 14;
+      const sm = t * t * (3 - 2 * t);
+      g = flatY * (1 - sm) + g * sm;
+    }
+    return Math.round(g);
+  };
+
+  const ground = new Int16Array(ANTSHORE_W + 1);
+  for (let x = 0; x <= ANTSHORE_W; x++) ground[x] = groundY(x);
+
+  // Lots of ants around every anthill plus roving patrols
+  const ants: Ant[] = [];
+  for (const ah of anthills) {
+    const count = 2 + (rnd() < 0.65 ? 1 : 0);
+    for (let i = 0; i < count; i++) {
+      const ox = (i - 1) * rr(14, 24);
+      const ax = Math.max(24, Math.min(ANTSHORE_LAKE_EDGE - 80, ah.x + ox));
+      const range = rr(36, 68);
+      const soldier = i === 0 && rnd() < 0.55;
+      const spd = soldier ? rr(22, 30) : rr(16, 25);
+      ants.push({
+        x: ax,
+        y: groundY(ax),
+        vx: rnd() < 0.5 ? -spd : spd,
+        minX: Math.max(18, ax - range),
+        maxX: Math.min(ANTSHORE_LAKE_EDGE - 75, ax + range),
+        alive: true,
+        respawn: 0,
+        walkT: rnd() * 5,
+        hp: soldier ? 2 : 1,
+        maxHp: soldier ? 2 : 1,
+        hitT: 0,
+        soldier,
+      });
+    }
+  }
+
+  // Extra patrolling ants between anthills
+  for (let px = 220; px < ANTSHORE_LAKE_EDGE - 140; px += rr(260, 380)) {
+    const ax = Math.round(px);
+    const spd = rr(18, 26);
+    ants.push({
+      x: ax,
+      y: groundY(ax),
+      vx: rnd() < 0.5 ? -spd : spd,
+      minX: Math.max(18, ax - 55),
+      maxX: Math.min(ANTSHORE_LAKE_EDGE - 75, ax + 55),
+      alive: true,
+      respawn: 0,
+      walkT: rnd() * 5,
+      hp: 1,
+      maxHp: 1,
+      hitT: 0,
+    });
+  }
+
+  // Dense dead grass, twigs, dry bushes, and pebbles
+  const decor: DeadDecor[] = [];
+  for (let dx = 6; dx < ANTSHORE_LAKE_EDGE - 8; dx += 3 + Math.floor(rnd() * 4)) {
+    if (nearHill(dx, 2) && rnd() < 0.7) continue;
+    const r = rnd();
+    const kind: DeadDecor["kind"] =
+      r < 0.68 ? "deadgrass" : r < 0.8 ? "drybush" : r < 0.9 ? "twig" : "pebble";
+    decor.push({ x: dx, kind, v: rnd(), c: Math.floor(rnd() * 4) });
+  }
+
+  const pier: Platform = { x: ANTSHORE_PIER_X0, y: LAKE_Y - 8, w: ANTSHORE_PIER_W, color: 0, kind: "pier" };
+
+  return {
+    w: ANTSHORE_W,
+    lakeEdge: ANTSHORE_LAKE_EDGE,
+    pier,
+    platforms: [pier],
+    groundY,
+    ground,
+    anthills,
+    ants,
+    decor,
+  };
 }
