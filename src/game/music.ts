@@ -1,7 +1,7 @@
 import { getAudioContext } from "./sfx";
 
 export type Track = "forest" | "dungeon" | "heaven" | null;
-type Voice = { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode | null };
+type Voice = { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode | null; cleanup?: () => void };
 type Part = {
   name: Exclude<Track, null>; bus: GainNode; voices: Set<Voice>;
   step: number; next: number; end: number;
@@ -43,9 +43,10 @@ export function setMusicMuted(m: boolean): void {
 // Every voice owns its nodes, including filtered drones; cleanup also runs on retirement.
 function dispose(voice: Voice): void {
   voice.osc.onended = null;
-  voice.osc.disconnect();
-  voice.gain.disconnect();
-  voice.filter?.disconnect();
+  try { voice.osc.disconnect(); } catch { /* Already disconnected. */ }
+  try { voice.gain.disconnect(); } catch { /* Already disconnected. */ }
+  try { voice.filter?.disconnect(); } catch { /* Already disconnected. */ }
+  voice.cleanup?.();
 }
 
 function note(
@@ -88,6 +89,87 @@ function note(
   osc.onended = () => { dispose(voice); part.voices.delete(voice); };
   osc.start(time);
   osc.stop(time + duration + 0.02);
+}
+
+/** Synthesizes a multi-voice angelic choir tone using vocal vowel formants ("ah"/"oh") + vibrato. */
+function choirNote(
+  part: Part, time: number, midi: number, duration: number,
+  level: number, vowel: "ah" | "oh" = "ah",
+): void {
+  if (!ctx) return;
+  const osc1 = ctx.createOscillator();
+  const osc2 = ctx.createOscillator();
+  const lfo = ctx.createOscillator();
+  const lfoGain = ctx.createGain();
+  const f1 = ctx.createBiquadFilter();
+  const f2 = ctx.createBiquadFilter();
+  const lp = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+
+  osc1.type = "sawtooth";
+  osc2.type = "sawtooth";
+  osc1.frequency.setValueAtTime(hz(midi - 0.06), time);
+  osc2.frequency.setValueAtTime(hz(midi + 0.06), time);
+
+  // Vocal vibrato (~5.2 Hz subtle pitch shimmer)
+  lfo.type = "sine";
+  lfo.frequency.setValueAtTime(5.2, time);
+  lfoGain.gain.setValueAtTime(6, time);
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc1.detune);
+  lfoGain.connect(osc2.detune);
+
+  // Dual vowel formant filters + warm lowpass rolloff
+  f1.type = "bandpass";
+  f1.frequency.setValueAtTime(vowel === "ah" ? 730 : 520, time);
+  f1.Q.value = 3.2;
+
+  f2.type = "bandpass";
+  f2.frequency.setValueAtTime(vowel === "ah" ? 1120 : 880, time);
+  f2.Q.value = 4.0;
+
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(2400, time);
+  lp.Q.value = 0.6;
+
+  // Expressive choral swell envelope
+  const att = Math.min(0.24, duration * 0.28);
+  const rel = Math.min(0.35, duration * 0.35);
+  gain.gain.setValueAtTime(0, time);
+  gain.gain.linearRampToValueAtTime(level, time + att);
+  gain.gain.setValueAtTime(level * 0.92, Math.max(time + att, time + duration - rel));
+  gain.gain.linearRampToValueAtTime(0, time + duration);
+
+  osc1.connect(f1);
+  osc1.connect(f2);
+  osc2.connect(f1);
+  osc2.connect(f2);
+  f1.connect(lp);
+  f2.connect(lp);
+  lp.connect(gain);
+  gain.connect(part.bus);
+
+  const voice: Voice = {
+    osc: osc1,
+    gain,
+    filter: lp,
+    cleanup: () => {
+      for (const node of [osc2, lfo, lfoGain, f1, f2]) {
+        try { node.disconnect(); } catch { /* Already disconnected. */ }
+      }
+      try { osc2.stop(); } catch { /* Already stopped. */ }
+      try { lfo.stop(); } catch { /* Already stopped. */ }
+    },
+  };
+  part.voices.add(voice);
+  osc1.onended = () => { dispose(voice); part.voices.delete(voice); };
+  osc1.start(time);
+  osc2.start(time);
+  lfo.start(time);
+  const stopAt = time + duration + 0.04;
+  osc1.stop(stopAt);
+  osc2.stop(stopAt);
+  lfo.stop(stopAt);
 }
 
 // Sixteen bars in F major: F, C, Dm, Bb, F, Am, Bb, C (two bars each).
@@ -149,6 +231,18 @@ const HEAVEN_CHORDS: readonly (readonly number[])[] = [
   [60, 64, 67], [58, 62, 65], [55, 59, 62], [55, 60, 62],
 ];
 
+// Soaring soprano choir lead over the 8-bar Goldfish of Destruction battle theme.
+const CHOIR_LEAD: readonly (readonly number[])[] = [
+  [72, 0, 0, 0, 76, 0, 79, 0],
+  [79, 0, 0, 0, 76, 0, 74, 0],
+  [76, 0, 0, 0, 72, 0, 76, 0],
+  [77, 0, 0, 0, 74, 0, 72, 0],
+  [79, 0, 0, 0, 81, 0, 84, 0],
+  [82, 0, 0, 0, 81, 0, 77, 0],
+  [79, 0, 0, 0, 74, 0, 76, 0],
+  [79, 0, 0, 0, 74, 0, 79, 0],
+];
+
 function heaven(part: Part, time: number): void {
   const eighth = 60 / 112 / 2;
   const step = part.step % 64;
@@ -156,13 +250,24 @@ function heaven(part: Part, time: number): void {
   const beat = step % 8;
   const chord = HEAVEN_CHORDS[bar] ?? HEAVEN_CHORDS[0]!;
   const root = chord[0]!;
-  if (beat === 0) note(part, time, root - 24, eighth * 7.8, "sawtooth", 0.065, 420, 0, true);
-  if (beat % 2 === 0) note(part, time, root - 12, eighth * 1.5, "triangle", 0.09);
-  const chime = chord[beat % 3]! + (beat >= 4 ? 24 : 12);
-  note(part, time, chime, eighth * 0.9, "sine", 0.06);
-  if (beat === 0 || beat === 3 || beat === 6) {
-    note(part, time, chord[2]! + 12, eighth * 1.6, "square", 0.032, 1800);
+  // Sacred bass organ pedal
+  if (beat === 0) {
+    note(part, time, root - 24, eighth * 7.8, "sawtooth", 0.06, 380, 0, true);
+    // Angelic lower choir (Tenor & Alto harmony singing "oh" and "ah")
+    choirNote(part, time, chord[0]!, eighth * 8.1, 0.14, "oh");
+    choirNote(part, time, chord[1]!, eighth * 8.1, 0.12, "ah");
+    choirNote(part, time, chord[2]!, eighth * 8.1, 0.13, "ah");
   }
+  // Soaring Soprano choir lead melody
+  const soprano = CHOIR_LEAD[bar]?.[beat] ?? 0;
+  if (soprano) {
+    const dur = beat === 0 ? eighth * 3.9 : eighth * 2.1;
+    choirNote(part, time, soprano, dur, 0.17, beat === 0 ? "ah" : "oh");
+  }
+  // Rhythmic drive & celestial harp chimes underneath the singing choir
+  if (beat % 2 === 0) note(part, time, root - 12, eighth * 1.4, "triangle", 0.075);
+  const chime = chord[beat % 3]! + (beat >= 4 ? 24 : 12);
+  note(part, time, chime, eighth * 0.85, "sine", 0.045);
 }
 
 function retire(part: Part): void {

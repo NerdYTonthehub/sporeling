@@ -9,8 +9,8 @@ export const LAKE_Y = GROUND_BASE + 12;
 /** A little pier sticks out over the water; this is as far left as you can go. */
 export const PIER_X0 = LAKE_EDGE - 70;
 export const LAKE_MIN_X = PIER_X0 + 6;
-/** Lighthouse standing on the lake shore beside the spawn & boat dock. */
-export const LIGHTHOUSE_X = LAKE_EDGE + 95;
+/** Lighthouse standing right on the sandy beach beside the pier. */
+export const LIGHTHOUSE_X = LAKE_EDGE + 48;
 /** Boat fare to sail across the Great Lake to the ant-infested far shore. */
 export const BOAT_FARE = 100;
 
@@ -284,16 +284,16 @@ export function generateWorld(seed = 1337, doorIndex?: number): { world: World; 
     // the Great Lake: flat water surface, then a sandy shore rising out of it
     if (x < LAKE_EDGE) return LAKE_Y;
     let g = rawGround(x);
-    if (x < LAKE_EDGE + 70) {
-      const t = (x - LAKE_EDGE) / 70;
+    if (x < LAKE_EDGE + 32) {
+      const t = (x - LAKE_EDGE) / 32;
       const sm = t * t * (3 - 2 * t);
       g = LAKE_Y * (1 - sm) + g * sm;
     }
     const lhDist = Math.abs(x - LIGHTHOUSE_X);
-    if (lhDist < 36) {
+    if (lhDist < 32) {
       const flatY = rawGround(LIGHTHOUSE_X);
       if (lhDist < 18) return Math.round(flatY);
-      const t = (lhDist - 18) / 18;
+      const t = (lhDist - 18) / 14;
       const sm = t * t * (3 - 2 * t);
       g = flatY * (1 - sm) + g * sm;
     }
