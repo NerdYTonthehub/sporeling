@@ -58,8 +58,8 @@ describe("GameScreen HUD, save, and music", () => {
 
   afterEach(() => {
     cleanup();
-    vi.restoreAllMocks();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("shows Play without a save, removes top-right HUD, and starts forest music", () => {
@@ -93,5 +93,31 @@ describe("GameScreen HUD, save, and music", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pause game" }));
     fireEvent.click(screen.getByRole("button", { name: "Save game" }));
     expect(screen.getByRole("button", { name: "Saved!" })).toBeInTheDocument();
+  });
+
+  it("saves progress when you die and preserves it when clicking Sprout again", () => {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(sampleSave));
+    render(<GameScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("42 coins")).toBeInTheDocument();
+
+    localStorage.removeItem(SAVE_KEY);
+    const game = (window as unknown as { __game: { hurt?: unknown; die: () => void; vitals: { health: number; hunger: number } } }).__game;
+    act(() => {
+      game.vitals.health = 0;
+      game.die();
+    });
+
+    expect(screen.getByText(/You wilted/)).toBeInTheDocument();
+    const savedRaw = localStorage.getItem(SAVE_KEY);
+    expect(savedRaw).not.toBeNull();
+    const parsed = JSON.parse(savedRaw!);
+    expect(parsed.coins).toBe(42);
+    expect(parsed.health).toBe(100);
+    expect(parsed.discovered).toContain("Mossbottom");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sprout again" }));
+    expect(screen.queryByText(/You wilted/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("42 coins")).toBeInTheDocument();
   });
 });
