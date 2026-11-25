@@ -1,6 +1,6 @@
 // Pixel-art drawing helpers. Everything is drawn with integer fillRects on a low-res canvas.
 import type { House } from "./world";
-import { FISH_H, FISH_W, fishPixels, type FishSpecies } from "./fishing";
+import { fishDims, fishPixels, type FishSpecies } from "./fishing";
 
 type Ctx = CanvasRenderingContext2D;
 type R = [number, number, number, number, string];
@@ -303,8 +303,9 @@ export function drawHouse(ctx: Ctx, h: House, sx: number, gy: number, night: num
 
 /** Draws a small fish centered on (x, y). */
 export function drawFish(ctx: Ctx, x: number, y: number, sp: FishSpecies, facing = 1) {
-  const ox = Math.round(x - FISH_W / 2);
-  const oy = Math.round(y - FISH_H / 2);
+  const { w, h } = fishDims(sp);
+  const ox = Math.round(x - w / 2);
+  const oy = Math.round(y - h / 2);
   for (const [px, py, c] of fishPixels(sp, facing)) {
     ctx.fillStyle = c;
     ctx.fillRect(ox + px, oy + py, 1, 1);
@@ -579,4 +580,181 @@ export function drawSword(ctx: Ctx, hx: number, hy: number, a: number) {
     ctx.fillStyle = c;
     ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
   }
+}
+
+export interface GodBossOpts {
+  t: number;
+  flash: boolean;
+  hideHandSide?: -1 | 1 | undefined;
+  dashDir?: number | undefined;
+}
+
+/**
+ * The Goldfish of Destruction (also known as God):
+ * orange-gold fish head with crest & glowing eyes, white angel wings,
+ * draped white toga with gold clasp, and forked fish-tail base.
+ * (x, y) = bottom-centre (tail base).
+ */
+export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
+  const C = (hex: string) => (o.flash ? "#ffffff" : hex);
+  const SKIN = C("#e2841c");
+  const SKIN_L = C("#f8b93a");
+  const SKIN_D = C("#b45b12");
+  const WING = C("#f4f2fb");
+  const WING_SH = C("#c4bfd9");
+  const TOGA = C("#f5f3fa");
+  const TOGA_SH = C("#cbc6de");
+  const GOLD = C("#ffe46b");
+  const dark = OUTLINE;
+
+  const flap = Math.round(Math.sin(o.t * 4.5) * 2);
+  const crouch = o.dashDir ? 4 : 0;
+  const by = y + crouch;
+
+  // 1. Outstretched angel wings (behind body)
+  for (const side of [-1, 1] as const) {
+    const featherSpecs: [number, number, number, number][] = [
+      [8, -28 + flap, 7, 10],
+      [14, -31 + flap, 8, 11],
+      [21, -33 + flap, 8, 10],
+      [27, -33 + flap, 7, 8],
+      [11, -20 + flap, 7, 6],
+      [18, -22 + flap, 7, 6],
+    ];
+    for (const [dx, dy, w, h] of featherSpecs) {
+      const wx = side > 0 ? x + dx : x - dx - w;
+      rect(ctx, dark, wx - 1, by + dy - 1, w + 2, h + 2);
+    }
+    for (const [dx, dy, w, h] of featherSpecs) {
+      const wx = side > 0 ? x + dx : x - dx - w;
+      rect(ctx, WING, wx, by + dy, w, h);
+      rect(ctx, WING_SH, wx, by + dy + h - 2, w, 2);
+    }
+  }
+
+  // 2. Forked fish-tail base + lower body
+  const tailParts: R[] = [
+    [x - 4, by - 14, 8, 10, SKIN],
+    [x - 7, by - 5, 6, 3, SKIN],
+    [x + 1, by - 5, 6, 3, SKIN],
+    [x - 10, by - 3, 7, 3, SKIN],
+    [x + 3, by - 3, 7, 3, SKIN],
+  ];
+  // 3. Outstretched arms (omitting a hand if it's currently enlarged for smash)
+  for (const side of [-1, 1] as const) {
+    if (o.hideHandSide === side) continue;
+    const ax = side > 0 ? x + 5 : x - 14;
+    tailParts.push([ax, by - 25, 9, 4, SKIN]);
+    const hx = side > 0 ? x + 13 : x - 17;
+    tailParts.push([hx, by - 26, 4, 5, SKIN]);
+    tailParts.push([hx + (side > 0 ? 1 : 0), by - 27, 2, 2, SKIN_L]);
+  }
+  // 4. Torso under the toga
+  tailParts.push([x - 5, by - 27, 10, 14, SKIN]);
+
+  ctx.fillStyle = dark;
+  for (const p of tailParts) ctx.fillRect(p[0] - 1, p[1] - 1, p[2] + 2, p[3] + 2);
+  for (const p of tailParts) rect(ctx, p[4], p[0], p[1], p[2], p[3]);
+
+  // Tail highlight / shading
+  rect(ctx, SKIN_L, x - 3, by - 13, 2, 8);
+  rect(ctx, SKIN_D, x + 2, by - 13, 2, 8);
+  rect(ctx, SKIN_D, x - 9, by - 1, 5, 1);
+  rect(ctx, SKIN_D, x + 4, by - 1, 5, 1);
+
+  // 5. White toga draped diagonally from left shoulder across waist
+  const togaParts: R[] = [
+    [x - 5, by - 27, 5, 4, TOGA],
+    [x - 6, by - 23, 8, 5, TOGA],
+    [x - 6, by - 18, 12, 5, TOGA],
+    [x - 7, by - 13, 13, 3, TOGA],
+  ];
+  ctx.fillStyle = dark;
+  for (const p of togaParts) ctx.fillRect(p[0] - 1, p[1] - 1, p[2] + 2, p[3] + 2);
+  for (const p of togaParts) rect(ctx, p[4], p[0], p[1], p[2], p[3]);
+  rect(ctx, TOGA_SH, x - 6, by - 12, 12, 2);
+  rect(ctx, TOGA_SH, x + 3, by - 18, 3, 6);
+  // Gold shoulder brooch
+  rect(ctx, dark, x - 6, by - 28, 4, 3);
+  rect(ctx, GOLD, x - 5, by - 27, 2, 2);
+
+  // 6. Round goldfish head + top fin crest
+  const headY = by - 36;
+  ctx.fillStyle = dark;
+  fillCircle(ctx, x, headY, 10);
+  // Top dorsal spike
+  rect(ctx, dark, x - 2, headY - 14, 4, 6);
+  rect(ctx, SKIN, x - 1, headY - 13, 2, 5);
+  ctx.fillStyle = SKIN;
+  fillCircle(ctx, x, headY, 9);
+  ctx.fillStyle = SKIN_L;
+  fillCircle(ctx, x - 2, headY - 3, 5);
+  rect(ctx, SKIN_D, x + 4, headY - 4, 4, 7);
+
+  // Glowing white eyes + tiny 'o' mouth
+  rect(ctx, "#fff6b8", x - 6, headY - 2, 4, 4);
+  rect(ctx, "#fff6b8", x + 2, headY - 2, 4, 4);
+  rect(ctx, "#ffffff", x - 5, headY - 1, 2, 2);
+  rect(ctx, "#ffffff", x + 3, headY - 1, 2, 2);
+  rect(ctx, "#7a2c08", x - 1, headY + 4, 2, 2);
+
+  // Golden sparkles around God's head
+  const spPhase = Math.floor(o.t * 6) % 2;
+  for (const [sx, sy] of [
+    [-12, -42],
+    [11, -43],
+    [-14, -32],
+    [13, -33],
+    [0, -51],
+  ] as const) {
+    const off = (sx + spPhase) % 2;
+    rect(ctx, GOLD, x + sx, by + sy + off, 1, 1);
+    if (off === 0) rect(ctx, "#ffffff", x + sx, by + sy - 1, 1, 1);
+  }
+}
+
+/** Enlarged orange-gold fist for God's Ground Smash attack. (x, y) = centre of fist. */
+export function drawBigHand(ctx: Ctx, x: number, y: number, flash = false) {
+  const f = flash ? "#ffffff" : "#e2841c";
+  const l = flash ? "#ffffff" : "#f8b93a";
+  const d = flash ? "#ffffff" : "#b45b12";
+  rect(ctx, OUTLINE, x - 11, y - 9, 22, 18);
+  rect(ctx, OUTLINE, x - 13, y - 6, 26, 12);
+  rect(ctx, f, x - 10, y - 8, 20, 16);
+  rect(ctx, f, x - 12, y - 5, 24, 10);
+  rect(ctx, l, x - 8, y - 7, 14, 4);
+  rect(ctx, d, x - 10, y + 4, 20, 4);
+  // knuckle ridges
+  for (const kx of [-6, -1, 4]) rect(ctx, OUTLINE, x + kx, y + 3, 2, 5);
+}
+
+/**
+ * Sprite #3: Golden fish bomb pointing along (vx, vy), with glowing red tip and golden sparkles.
+ */
+export function drawFishBomb(ctx: Ctx, x: number, y: number, vx: number, vy: number, t: number) {
+  const ang = Math.atan2(vy, vx);
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.rotate(ang);
+  // Facing +X in local space: nose at +8, forked tail at -8
+  rect(ctx, OUTLINE, -8, -4, 15, 8);
+  rect(ctx, OUTLINE, -10, -5, 4, 10);
+  rect(ctx, OUTLINE, 6, -3, 3, 6);
+  // Tail fin
+  rect(ctx, "#d97c18", -9, -4, 3, 3);
+  rect(ctx, "#d97c18", -9, 1, 3, 3);
+  // Golden body
+  rect(ctx, "#f5b82e", -6, -3, 12, 6);
+  rect(ctx, "#fff3a0", -4, -2, 8, 2);
+  rect(ctx, "#d97c18", -5, 2, 10, 1);
+  // Pointed nose + glowing red bomb eye/tip
+  rect(ctx, "#f5b82e", 6, -2, 2, 4);
+  rect(ctx, "#e0362c", 4, -1, 3, 2);
+  rect(ctx, "#ff9a80", 5, -1, 1, 1);
+  ctx.restore();
+  // Twinkling sparkles around the fish bomb
+  const bob = Math.floor(t * 8) % 2;
+  rect(ctx, "#ffe46b", Math.round(x - 7 + bob), Math.round(y - 7), 1, 1);
+  rect(ctx, "#fff8c4", Math.round(x + 7), Math.round(y - 5 - bob), 1, 1);
+  rect(ctx, "#ffe46b", Math.round(x - 5), Math.round(y + 6 + bob), 1, 1);
 }

@@ -1,6 +1,6 @@
 import { getAudioContext } from "./sfx";
 
-export type Track = "forest" | "dungeon" | null;
+export type Track = "forest" | "dungeon" | "heaven" | null;
 type Voice = { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode | null };
 type Part = {
   name: Exclude<Track, null>; bus: GainNode; voices: Set<Voice>;
@@ -144,6 +144,27 @@ function dungeon(part: Part, time: number): void {
   if (pulse === 6 && bar % 4 === 3) note(part, time, 63, beat * 2.5, "triangle", 0.04, 950, -6);
 }
 
+const HEAVEN_CHORDS: readonly (readonly number[])[] = [
+  [60, 64, 67], [55, 59, 62], [57, 60, 64], [53, 57, 60],
+  [60, 64, 67], [58, 62, 65], [55, 59, 62], [55, 60, 62],
+];
+
+function heaven(part: Part, time: number): void {
+  const eighth = 60 / 112 / 2;
+  const step = part.step % 64;
+  const bar = Math.floor(step / 8);
+  const beat = step % 8;
+  const chord = HEAVEN_CHORDS[bar] ?? HEAVEN_CHORDS[0]!;
+  const root = chord[0]!;
+  if (beat === 0) note(part, time, root - 24, eighth * 7.8, "sawtooth", 0.065, 420, 0, true);
+  if (beat % 2 === 0) note(part, time, root - 12, eighth * 1.5, "triangle", 0.09);
+  const chime = chord[beat % 3]! + (beat >= 4 ? 24 : 12);
+  note(part, time, chime, eighth * 0.9, "sine", 0.06);
+  if (beat === 0 || beat === 3 || beat === 6) {
+    note(part, time, chord[2]! + 12, eighth * 1.6, "square", 0.032, 1800);
+  }
+}
+
 function retire(part: Part): void {
   for (const voice of part.voices) {
     try { voice.osc.stop(); } catch { /* Already stopped. */ }
@@ -159,7 +180,8 @@ function tick(): void {
   parts = parts.filter(part => {
     if (now >= part.end) { retire(part); return false; }
     if (part === current) {
-      const interval = 60 / (part.name === "forest" ? 84 : 64) / 2;
+      const bpm = part.name === "forest" ? 84 : part.name === "heaven" ? 112 : 64;
+      const interval = 60 / bpm / 2;
       // Skip missed steps after a background-tab stall rather than bursting notes.
       if (part.next < now) {
         const skipped = Math.ceil((now - part.next) / interval);
@@ -168,6 +190,7 @@ function tick(): void {
       }
       while (part.next < now + 0.2) {
         if (part.name === "forest") forest(part, part.next);
+        else if (part.name === "heaven") heaven(part, part.next);
         else dungeon(part, part.next);
         part.next += interval;
         part.step++;

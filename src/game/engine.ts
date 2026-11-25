@@ -1,9 +1,26 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
 import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
-import { FISH, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
+import { FISH, MAX_HOLY_TRIES, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
 import { sfx } from "./sfx";
 import { eatApple, eatGlowcap, isDead, nap, takeDamage, tickVitals, type Vitals } from "./vitals";
 import { ATTACK_COOLDOWN, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, damageFlyer, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
+import {
+  GOD_BEAM_DAMAGE,
+  GOD_BOMB_DAMAGE,
+  GOD_DASH_DAMAGE,
+  GOD_SMASH_DAMAGE,
+  HEAVEN_FLOOR_Y,
+  applyHolyTryOutcome,
+  beamBounds,
+  beamHitsPlayer,
+  createHeaven,
+  drawHeavenBack,
+  drawHeavenEffects,
+  drawHeavenFloor,
+  nextGodAttack,
+  stompHitsDashGod,
+  type HeavenState,
+} from "./heaven";
 import {
   PIT_Y,
   ceilAt,
@@ -58,7 +75,7 @@ const PIT_DAMAGE = 15;
 const SHOCKWAVE_DAMAGE = 14;
 
 export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
-export type Scene = "forest" | "dungeon" | "room";
+export type Scene = "forest" | "dungeon" | "room" | "heaven";
 
 interface Level {
   w: number;
@@ -99,7 +116,8 @@ export interface HudState {
   coinPop: { amount: number; id: number } | null;
   scene: Scene;
   doubleJump: boolean;
-  boss: { hp: number; max: number } | null;
+  godDefeated: boolean;
+  boss: { name: string; hp: number; max: number } | null;
 }
 
 interface Particle {
@@ -194,6 +212,12 @@ export class Game {
   private fade: { t: number; action: (() => void) | null } | null = null;
   private shockwaves: Shockwave[] = [];
   private lakeHintT = 0;
+  private heaven: HeavenState | null = null;
+  private heavenLvl: Level | null = null;
+  private godDefeated = false;
+  private holyTries = 0;
+  private sacrificedFish: string[] = [];
+  private releasingKind: "coin" | "heaven" = "coin";
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -217,6 +241,8 @@ export class Game {
     this.scene = "forest";
     this.dungeon = null;
     this.room = null;
+    this.heaven = null;
+    this.heavenLvl = null;
     this.p = {
       x: START_X,
       y: this.groundAt(START_X),
@@ -256,6 +282,10 @@ export class Game {
     this.fade = null;
     this.shockwaves = [];
     this.paused = false;
+    this.godDefeated = false;
+    this.holyTries = 0;
+    this.sacrificedFish = [];
+    this.releasingKind = "coin";
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
     this.emitHud();
@@ -266,6 +296,14 @@ export class Game {
     this.canvas.width = w;
     this.canvas.height = this.H;
     this.ctx.imageSmoothingEnabled = false;
+    if (this.scene === "heaven" && this.heaven && this.heavenLvl) {
+      this.heaven.w = w;
+      const ground = new Int16Array(w + 1);
+      ground.fill(HEAVEN_FLOOR_Y);
+      this.heavenLvl = { w, ground, platforms: [], beetles: [], flyers: [] };
+      this.lvl = this.heavenLvl;
+      this.p.x = clamp(this.p.x, 12, w - 12);
+    }
   }
 
   mount() {
@@ -338,6 +376,9 @@ export class Game {
       doubleJump: this.hasDoubleJump,
       dungeonCleared: !!this.dungeon?.relicTaken,
       discovered: this.world.villages.filter((v) => v.discovered).map((v) => v.name),
+      godDefeated: this.godDefeated,
+      holyTries: this.holyTries,
+      sacrificedFish: this.sacrificedFish.slice(-60),
     };
   }
 
@@ -352,6 +393,9 @@ export class Game {
     this.applesEaten = s.applesEaten;
     this.time = s.time;
     this.hasDoubleJump = s.doubleJump;
+    this.godDefeated = s.godDefeated === true;
+    this.holyTries = s.holyTries ?? 0;
+    this.sacrificedFish = [...(s.sacrificedFish ?? [])];
     for (const v of this.world.villages) v.discovered = s.discovered.includes(v.name);
     if (s.dungeonCleared) {
       const d = createDungeon();
@@ -451,12 +495,18 @@ export class Game {
   }
 
   private snapCamera() {
+    if (this.scene === "heaven") {
+      this.camX = 0;
+      this.camY = 0;
+      return;
+    }
     const p = this.p;
     this.camX = clamp(p.x - this.W / 2, 0, Math.max(0, this.lvl.w - this.W));
     this.camY = this.cameraTargetY();
   }
 
   private cameraTargetY() {
+    if (this.scene === "heaven") return 0;
     const p = this.p;
     const g = this.groundAt(p.x);
     if (this.scene === "dungeon") return Math.max(-30, Math.min(p.y - this.H * 0.62, g + 38 - this.H));
@@ -464,10 +514,12 @@ export class Game {
   }
 
   private minX() {
+    if (this.scene === "heaven") return 10;
     return this.scene === "forest" ? LAKE_MIN_X : 12;
   }
 
   private maxX() {
+    if (this.scene === "heaven") return this.lvl.w - 10;
     if (this.scene === "dungeon" && this.dungeon) {
       const g = this.dungeon.gates.find((gt) => gt.openT < 0.6);
       if (g) return g.x - 9;
@@ -633,11 +685,16 @@ export class Game {
       this.scene === "forest" &&
       this.world.villages.some((v) => Math.abs(p.x - v.fireX) < 26 && Math.abs(p.y - this.villageFloor(v)) < 6);
     if (active) {
-      this.vitals = tickVitals(this.vitals, dt, { nearFire: this.nearFire });
+      if (this.scene !== "heaven") {
+        this.vitals = tickVitals(this.vitals, dt, { nearFire: this.nearFire });
+      }
       if (this.nearFire && this.vitals.health < 100 && Math.random() < dt * 4) {
         this.spawn({ x: p.x + (Math.random() * 10 - 5), y: p.y - 18, vx: 0, vy: -14, life: 1, color: "#ff5a6a", size: 1, grav: 0, kind: "heart" });
       }
-      if (isDead(this.vitals)) this.die();
+      if (isDead(this.vitals)) {
+        if (this.scene === "heaven") this.leaveHeavenOnDeath();
+        else this.die();
+      }
     }
 
     // village discovery
@@ -667,6 +724,7 @@ export class Game {
     this.updateShockwaves(dt, active && this.mode !== "releasing" && !this.fade);
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
+    if (this.scene === "heaven") this.updateHeaven(dt, active && this.mode !== "releasing" && !this.fade);
     if (active && this.attackT > 0) this.resolveAttack();
     if (active && this.mode === "fishing") this.updateFishing(dt);
     if (active && this.mode === "releasing") this.updateRelease(dt);
@@ -679,9 +737,14 @@ export class Game {
     this.updateParticles(dt);
 
     // camera
-    const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, Math.max(0, this.lvl.w - this.W));
-    this.camX += (targetX - this.camX) * Math.min(1, dt * 4);
-    this.camY += (this.cameraTargetY() - this.camY) * Math.min(1, dt * 3);
+    if (this.scene === "heaven") {
+      this.camX = 0;
+      this.camY = 0;
+    } else {
+      const targetX = clamp(p.x - this.W / 2 + p.facing * 18, 0, Math.max(0, this.lvl.w - this.W));
+      this.camX += (targetX - this.camX) * Math.min(1, dt * 4);
+      this.camY += (this.cameraTargetY() - this.camY) * Math.min(1, dt * 3);
+    }
     this.shakeT -= dt;
   }
 
@@ -916,6 +979,17 @@ export class Game {
         this.hitFlyer(f);
       }
     }
+    if (this.scene === "heaven" && this.heaven) {
+      const g = this.heaven.god;
+      if (g.hp > 0 && g.hitT <= 0 && !this.swingHits.has(g)) {
+        const bodyHit = attackHits(p.x, p.y, p.facing, g.x, g.y - 22, 18, 22);
+        const handHit = g.phase === "hand_smash" && attackHits(p.x, p.y, p.facing, g.handX, g.handY, 15, 12);
+        if (bodyHit || handHit) {
+          this.swingHits.add(g);
+          this.damageGod(1);
+        }
+      }
+    }
   }
 
   private bits(x: number, y: number, n: number, a: string, b: string) {
@@ -973,7 +1047,10 @@ export class Game {
     p.plat = null;
     this.shakeT = 0.25;
     sfx.hurt();
-    if (isDead(this.vitals)) this.die();
+    if (isDead(this.vitals)) {
+      if (this.scene === "heaven") this.leaveHeavenOnDeath();
+      else this.die();
+    }
   }
 
   private updateFlyers(dt: number, active: boolean) {
@@ -1195,6 +1272,10 @@ export class Game {
       this.updateDungeonInteract();
       return;
     }
+    if (this.scene === "heaven") {
+      this.prompt = null;
+      return;
+    }
     const p = this.p;
     const A = this.labels.act;
     let nearNpc: Npc | null = null;
@@ -1333,7 +1414,7 @@ export class Game {
     }
     this.prompt = `${this.labels.jump}!`;
     if (res === "caught") {
-      const fish = rollFish(Math.random());
+      const fish = rollFish(Math.random(), this.hasDoubleJump);
       this.inventory = addFish(this.inventory, fish.id);
       this.fishCaught++;
       sfx.caught();
@@ -1341,7 +1422,7 @@ export class Game {
         this.spawn({ x: f.bobX, y: wy, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
       }
       this.catchAnim = { fish, t: 0, x0: f.bobX, y0: wy };
-      this.endFishing(`You caught a ${fish.name}!`);
+      this.endFishing(fish.id === "godly" ? "You caught a Godly Goldfish!" : `You caught a ${fish.name}!`);
     } else if (res === "missed") {
       sfx.splash();
       this.endFishing("It got away…");
@@ -1354,7 +1435,9 @@ export class Game {
     if (!fish || !this.running || this.dead || (this.inventory[id] ?? 0) <= 0) return false;
     if (this.mode === "releasing" || this.scene !== "forest" || this.fade) return false;
     if (this.mode === "fishing") this.endFishing(null);
-    this.inventory = removeFish(this.inventory, id);
+    const toHeaven = id === "godly" && !this.godDefeated;
+    if (!toHeaven) this.inventory = removeFish(this.inventory, id);
+    this.releasingKind = toHeaven ? "heaven" : "coin";
     this.mode = "releasing";
     this.talking = null;
     this.p.vx = 0;
@@ -1396,7 +1479,13 @@ export class Game {
       this.fishReleased++;
       this.mode = "walk";
       this.releasing = null;
-      const reward = releaseReward(r.fish.id);
+      if (this.releasingKind === "heaven") {
+        this.enterHeaven();
+        return;
+      }
+      this.sacrificedFish.push(r.fish.id);
+      if (this.sacrificedFish.length > 60) this.sacrificedFish.shift();
+      const reward = releaseReward(r.fish.id, this.godDefeated);
       this.coins += reward;
       this.coinPop = { amount: reward, id: ++this.coinPopId, t: 2.2 };
       sfx.coin();
@@ -1405,6 +1494,354 @@ export class Game {
       }
       this.showToast(`The ${r.fish.name} floated up into the light. +${reward} coins!`);
     }
+  }
+
+  // ---------- Heaven Arena & Goldfish of Destruction (God) ----------
+  private enterHeaven() {
+    sfx.discover();
+    this.transition(() => {
+      this.returnPos = { x: START_X, y: this.forestLvl.ground[START_X] ?? GROUND_BASE };
+      const h = createHeaven(this.W, this.sacrificedFish);
+      const ground = new Int16Array(h.w + 1);
+      ground.fill(HEAVEN_FLOOR_Y);
+      this.heaven = h;
+      this.heavenLvl = { w: h.w, ground, platforms: [], beetles: [], flyers: [] };
+      this.lvl = this.heavenLvl;
+      this.scene = "heaven";
+      this.talking = null;
+      this.shockwaves = [];
+      this.particles = [];
+      this.vitals = { health: 100, hunger: 100 };
+      const p = this.p;
+      p.x = Math.round(h.w * 0.25);
+      p.y = HEAVEN_FLOOR_Y;
+      p.vx = 0;
+      p.vy = 0;
+      p.facing = 1;
+      p.plat = null;
+      p.onGround = true;
+      p.invuln = 1;
+      this.snapCamera();
+      this.banner = { title: "Heaven", sub: "The Goldfish of Destruction approaches…", t: 3.5 };
+    });
+  }
+
+  private leaveHeavenOnDeath() {
+    if (this.fade) return;
+    const outcome = applyHolyTryOutcome(this.inventory, this.holyTries, false);
+    this.inventory = outcome.inventory;
+    this.holyTries = outcome.holyTries;
+    this.transition(() => {
+      this.scene = "forest";
+      this.lvl = this.forestLvl;
+      this.heaven = null;
+      this.heavenLvl = null;
+      this.shockwaves = [];
+      this.particles = [];
+      this.talking = null;
+      this.dead = false;
+      this.vitals = { health: 100, hunger: 100 };
+      const p = this.p;
+      p.x = START_X;
+      p.y = this.groundAt(START_X);
+      p.vx = 0;
+      p.vy = 0;
+      p.plat = null;
+      p.invuln = 1.5;
+      this.snapCamera();
+      if (outcome.fishConsumed) {
+        this.showToast("You wake up at spawn. Your Godly Goldfish vanished after 3 tries!");
+      } else {
+        const left = MAX_HOLY_TRIES - outcome.holyTries;
+        this.showToast(`You wake up at spawn as if nothing happened… (${left} ${left === 1 ? "try" : "tries"} left)`);
+      }
+    });
+  }
+
+  private damageGod(amount = 1) {
+    const h = this.heaven;
+    if (!h) return;
+    const g = h.god;
+    if (g.hp <= 0 || g.hitT > 0) return;
+    g.hp = Math.max(0, g.hp - amount);
+    g.hitT = 0.35;
+    this.shakeT = 0.2;
+    sfx.bossHit();
+    this.bits(g.x, g.y - 24, 10, "#ffe46b", "#f4f2fb");
+    if (g.hp <= 0) {
+      g.phase = "defeated";
+      h.defeatTimer = 3.2;
+      h.bombs = [];
+      g.beamActive = false;
+      const outcome = applyHolyTryOutcome(this.inventory, this.holyTries, true);
+      this.inventory = outcome.inventory;
+      this.holyTries = outcome.holyTries;
+      this.godDefeated = true;
+      sfx.discover();
+      sfx.release();
+      this.shakeT = 0.45;
+      for (let i = 0; i < 36; i++) {
+        const a = (i / 36) * Math.PI * 2;
+        this.spawn({ x: g.x, y: g.y - 22, vx: Math.cos(a) * 85, vy: Math.sin(a) * 85, life: 1.4, color: i % 2 ? "#ffe46b" : "#ffffff", size: 1, grav: 0, kind: "star" });
+      }
+      this.banner = { title: "God Defeated!", sub: "All fish sacrifices now give 2× coins!", t: 4 };
+    }
+  }
+
+  private updateHeaven(dt: number, canFight: boolean) {
+    const h = this.heaven;
+    if (!h) return;
+    const g = h.god;
+    const p = this.p;
+    h.t += dt;
+    g.hitT = Math.max(0, g.hitT - dt);
+
+    // Update flying fish bombs (Attack 1)
+    for (const b of h.bombs) {
+      if (b.exploded) continue;
+      b.t += dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (Math.random() < dt * 20) {
+        this.spawn({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 14, vy: -10, life: 0.35, color: "#ffe46b", size: 1, grav: 0, kind: "star" });
+      }
+      const hitPlayer = canFight && p.invuln <= 0 && Math.hypot(b.x - p.x, b.y - (p.y - 9)) < 11;
+      if (hitPlayer || b.y >= h.floorY - 2) {
+        b.exploded = true;
+        sfx.bossHit();
+        this.bits(b.x, Math.min(b.y, h.floorY - 3), 10, "#f5b82e", "#e0362c");
+        if (hitPlayer) this.hurt(GOD_BOMB_DAMAGE, b.x);
+      }
+    }
+    h.bombs = h.bombs.filter((b) => !b.exploded && b.x > -30 && b.x < h.w + 30);
+
+    if (g.phase === "defeated") {
+      h.defeatTimer -= dt;
+      if (h.defeatTimer <= 0 && !this.fade) {
+        this.transition(() => {
+          this.scene = "forest";
+          this.lvl = this.forestLvl;
+          this.heaven = null;
+          this.heavenLvl = null;
+          this.shockwaves = [];
+          this.particles = [];
+          this.vitals = { health: 100, hunger: 100 };
+          p.x = START_X;
+          p.y = this.groundAt(START_X);
+          p.vx = 0;
+          p.vy = 0;
+          p.plat = null;
+          this.snapCamera();
+          this.showToast("Blessing unlocked: every fish sacrifice now grants 2× coins!");
+        });
+      }
+      return;
+    }
+
+    switch (g.phase) {
+      case "arrive": {
+        g.x = Math.round(h.w / 2);
+        g.y += (82 - g.y) * Math.min(1, dt * 2.5);
+        g.timer -= dt;
+        if (g.timer <= 0) {
+          g.phase = "hover";
+          g.timer = 0.9;
+          sfx.gate();
+          this.banner = { title: "Goldfish of Destruction", sub: "Also known as God", t: 3 };
+        }
+        break;
+      }
+      case "hover": {
+        const tx = h.w / 2 + Math.sin(h.t * 1.4) * Math.min(50, h.w * 0.16);
+        const ty = 78 + Math.sin(h.t * 2.4) * 6;
+        g.x += (tx - g.x) * Math.min(1, dt * 3);
+        g.y += (ty - g.y) * Math.min(1, dt * 3);
+        g.timer -= dt;
+        if (g.timer <= 0 && canFight) {
+          const next = nextGodAttack(g.attackIdx++);
+          g.phase = next;
+          g.sub = "windup";
+          if (next === "fish_bombs") {
+            g.timer = 0.55;
+            g.bombsLeft = 5;
+            g.bombCd = 0;
+          } else if (next === "hand_smash") {
+            g.timer = 0.7;
+            g.handSide = p.x >= g.x ? 1 : -1;
+            g.handX = clamp(p.x, 38, h.w - 38);
+            g.handY = 66;
+            g.smashHit = false;
+          } else if (next === "light_beam") {
+            const bounds = beamBounds(h.w);
+            g.beamDir = g.attackIdx % 2 === 0 ? 1 : -1;
+            g.beamX = g.beamDir > 0 ? bounds.minX : bounds.maxX;
+            g.beamActive = true;
+            g.timer = 0.9;
+          } else if (next === "dash") {
+            const startLeft = p.x > h.w / 2;
+            g.dashDir = startLeft ? 1 : -1;
+            g.x = startLeft ? 34 : h.w - 34;
+            g.dashTargetX = startLeft ? h.w - 34 : 34;
+            g.y = h.floorY;
+            g.timer = 0.65;
+          }
+        }
+        break;
+      }
+      case "fish_bombs": {
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 3);
+        g.y += (72 - g.y) * Math.min(1, dt * 3);
+        if (g.sub === "windup") {
+          g.timer -= dt;
+          if (g.timer <= 0) {
+            g.sub = "strike";
+            g.timer = 0.8;
+          }
+        } else {
+          g.bombCd -= dt;
+          if (g.bombsLeft > 0 && g.bombCd <= 0) {
+            const spread = (g.bombsLeft - 3) * 32;
+            const tx = clamp(p.x + spread, 20, h.w - 20);
+            const dx = tx - g.x;
+            const dy = h.floorY - 4 - (g.y - 22);
+            const len = Math.hypot(dx, dy) || 1;
+            const spd = 140;
+            h.bombs.push({ x: g.x, y: g.y - 22, vx: (dx / len) * spd, vy: (dy / len) * spd, t: 0, exploded: false });
+            sfx.cast();
+            g.bombsLeft--;
+            g.bombCd = 0.28;
+          }
+          if (g.bombsLeft <= 0) {
+            g.timer -= dt;
+            if (g.timer <= 0) {
+              g.phase = "hover";
+              g.timer = 1.0;
+            }
+          }
+        }
+        break;
+      }
+      case "hand_smash": {
+        if (g.sub === "windup") {
+          const target = clamp(p.x, 38, h.w - 38);
+          g.handX += (target - g.handX) * Math.min(1, dt * 5);
+          g.x += (g.handX - g.handSide * 22 - g.x) * Math.min(1, dt * 4);
+          g.y += (84 - g.y) * Math.min(1, dt * 4);
+          g.handY = g.y - 20;
+          g.timer -= dt;
+          if (g.timer <= 0) g.sub = "strike";
+        } else if (g.sub === "strike") {
+          g.handY += 440 * dt;
+          if (g.handY >= h.floorY - 9) {
+            g.handY = h.floorY - 9;
+            if (!g.smashHit) {
+              g.smashHit = true;
+              this.shakeT = 0.45;
+              sfx.gate();
+              this.dust(g.handX - 10, h.floorY, 6);
+              this.dust(g.handX + 10, h.floorY, 6);
+              this.shockwaves.push({ x: g.handX - 16, dir: -1, t: 0 }, { x: g.handX + 16, dir: 1, t: 0 });
+              if (canFight && p.invuln <= 0 && Math.abs(p.x - g.handX) < 17 && p.y > h.floorY - 18) {
+                this.hurt(GOD_SMASH_DAMAGE, g.handX);
+              }
+            }
+            g.sub = "recover";
+            g.timer = 0.55;
+          }
+        } else {
+          g.handY += (g.y - 20 - g.handY) * Math.min(1, dt * 6);
+          g.timer -= dt;
+          if (g.timer <= 0) {
+            g.phase = "hover";
+            g.timer = 0.9;
+          }
+        }
+        break;
+      }
+      case "light_beam": {
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 4);
+        g.y += (66 - g.y) * Math.min(1, dt * 4);
+        if (g.sub === "windup") {
+          g.timer -= dt;
+          if (g.timer <= 0) {
+            g.sub = "strike";
+            sfx.release();
+          }
+        } else {
+          const bounds = beamBounds(h.w);
+          g.beamX += g.beamDir * 140 * dt;
+          if (canFight && p.invuln <= 0 && beamHitsPlayer(g.beamX, p.x)) {
+            this.hurt(GOD_BEAM_DAMAGE, g.beamX);
+          }
+          if ((g.beamDir > 0 && g.beamX >= bounds.maxX) || (g.beamDir < 0 && g.beamX <= bounds.minX)) {
+            g.beamActive = false;
+            g.phase = "hover";
+            g.timer = 1.0;
+          }
+        }
+        break;
+      }
+      case "dash": {
+        if (g.sub === "windup") {
+          g.y = h.floorY;
+          g.timer -= dt;
+          if (g.timer <= 0) {
+            g.sub = "strike";
+            sfx.swing();
+          }
+        } else if (g.sub === "strike") {
+          g.x += g.dashDir * 205 * dt;
+          if (canFight) {
+            if (stompHitsDashGod(g, p.x, p.y, p.vy)) {
+              this.damageGod(1);
+              p.vy = -220;
+              p.onGround = false;
+              p.invuln = Math.max(p.invuln, 0.45);
+              sfx.stomp();
+            } else if (p.invuln <= 0 && Math.abs(p.x - g.x) < 15 && p.y > g.y - 36) {
+              this.hurt(GOD_DASH_DAMAGE, g.x);
+            }
+          }
+          if ((g.dashDir > 0 && g.x >= g.dashTargetX) || (g.dashDir < 0 && g.x <= g.dashTargetX)) {
+            g.x = g.dashTargetX;
+            g.sub = "recover";
+            g.timer = 0.45;
+          }
+        } else {
+          g.y += (82 - g.y) * Math.min(1, dt * 5);
+          g.timer -= dt;
+          if (g.timer <= 0) {
+            g.phase = "hover";
+            g.timer = 1.0;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  private renderHeaven(h: HeavenState) {
+    const ctx = this.ctx;
+    drawHeavenBack(ctx, h, this.W, this.H);
+    drawHeavenFloor(ctx, h, this.W, this.H);
+    drawHeavenEffects(ctx, h);
+    this.drawShockwaves(0, 0);
+    const p = this.p;
+    if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
+      drawMushroomPerson(ctx, Math.round(p.x), Math.round(p.y), {
+        facing: p.facing,
+        walk: p.walkT,
+        moving: Math.abs(p.vx) > 4,
+        air: !p.onGround,
+        cap: "#d9443a",
+        spots: true,
+        scale: 1,
+        blink: this.dead || p.blinkT < 0,
+      });
+    }
+    this.drawAttack(0, 0);
+    this.drawParticles(0, 0, false);
+    this.drawParticles(0, 0, true);
   }
 
   private spawn(o: Omit<Particle, "max" | "phase"> & { phase?: number }) {
@@ -1495,7 +1932,13 @@ export class Game {
       compass = { name: v.name, dir: v.x >= p.x ? 1 : -1, steps: Math.round(Math.abs(v.x - p.x) / 8), high: v.floorY !== undefined };
     }
     const tk = this.talking;
-    const boss = this.scene === "dungeon" && this.dungeon ? this.dungeon.beetles.find((b) => b.big && b.alive) : undefined;
+    const dungeonBoss = this.scene === "dungeon" && this.dungeon ? this.dungeon.beetles.find((b) => b.big && b.alive) : undefined;
+    const boss =
+      dungeonBoss && this.dungeon && p.x > this.dungeon.bossArenaX
+        ? { name: "Beetle King", hp: dungeonBoss.hp ?? 0, max: dungeonBoss.maxHp ?? 1 }
+        : this.scene === "heaven" && this.heaven && this.heaven.god.hp > 0
+          ? { name: "Goldfish of Destruction", hp: this.heaven.god.hp, max: this.heaven.god.maxHp }
+          : null;
     this.onHud({
       health: this.vitals.health,
       hunger: this.vitals.hunger,
@@ -1520,7 +1963,8 @@ export class Game {
       coinPop: this.coinPop ? { amount: this.coinPop.amount, id: this.coinPop.id } : null,
       scene: this.scene,
       doubleJump: this.hasDoubleJump,
-      boss: boss && this.dungeon && p.x > this.dungeon.bossArenaX ? { hp: boss.hp ?? 0, max: boss.maxHp ?? 1 } : null,
+      godDefeated: this.godDefeated,
+      boss,
     });
   }
 
@@ -1530,12 +1974,14 @@ export class Game {
       drawRoom(this.ctx, this.room, this.W, this.H, this.rp, this.time, this.darkness());
     } else if (this.scene === "dungeon" && this.dungeon) {
       this.renderDungeon(this.dungeon);
+    } else if (this.scene === "heaven" && this.heaven) {
+      this.renderHeaven(this.heaven);
     } else {
       this.renderForest();
     }
     if (this.fade) {
       this.ctx.globalAlpha = Math.max(0, 1 - Math.abs(this.fade.t / FADE * 2 - 1));
-      rect(this.ctx, "#080c09", 0, 0, this.W, this.H);
+      rect(this.ctx, this.scene === "heaven" || this.releasingKind === "heaven" ? "#fff6d6" : "#080c09", 0, 0, this.W, this.H);
       this.ctx.globalAlpha = 1;
     }
   }

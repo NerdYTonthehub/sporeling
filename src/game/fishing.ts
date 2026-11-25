@@ -8,7 +8,11 @@ export interface FishSpecies {
   fin: string;
   weight: number; // relative chance of being caught
   value: number; // coins earned when you give it to the light
+  winged?: boolean;
 }
+
+export const GODLY_CHANCE = 0.02;
+export const MAX_HOLY_TRIES = 3;
 
 export const FISH: FishSpecies[] = [
   { id: "minnow", name: "Puddle Minnow", body: "#9fb7c4", belly: "#e6eef0", fin: "#6f8a99", weight: 40, value: 2 },
@@ -16,6 +20,7 @@ export const FISH: FishSpecies[] = [
   { id: "carp", name: "Mossy Carp", body: "#4f8a5a", belly: "#b9d8a0", fin: "#2f5e3a", weight: 18, value: 8 },
   { id: "glowfin", name: "Glowfin", body: "#5fd6c4", belly: "#d8fff6", fin: "#2f9a8e", weight: 10, value: 15 },
   { id: "golden", name: "Golden Guppy", body: "#f2c84b", belly: "#fff1b0", fin: "#d08a2a", weight: 4, value: 40 },
+  { id: "godly", name: "Godly Goldfish", body: "#f5b82e", belly: "#fff3a0", fin: "#d97c18", weight: 0, value: 100, winged: true },
 ];
 
 /** Seconds you have to press SPACE after the "!" appears. */
@@ -26,18 +31,23 @@ export const WAIT_MAX = 6;
 
 export const rollWait = (r: number) => WAIT_MIN + r * (WAIT_MAX - WAIT_MIN);
 
-export function rollFish(r: number): FishSpecies {
-  const total = FISH.reduce((s, f) => s + f.weight, 0);
-  let acc = r * total;
-  for (const f of FISH) {
+export function rollFish(r: number, hasDoubleJump = false): FishSpecies {
+  const godly = FISH.find((f) => f.id === "godly")!;
+  if (hasDoubleJump && r < GODLY_CHANCE) return godly;
+  const norm = hasDoubleJump ? (r - GODLY_CHANCE) / (1 - GODLY_CHANCE) : r;
+  const pool = FISH.filter((f) => f.weight > 0);
+  const total = pool.reduce((s, f) => s + f.weight, 0);
+  let acc = norm * total;
+  for (const f of pool) {
     acc -= f.weight;
     if (acc < 0) return f;
   }
-  return FISH[FISH.length - 1]!;
+  return pool[pool.length - 1]!;
 }
 
-/** Coins you get for releasing a fish into the light. */
-export const releaseReward = (id: string) => FISH.find((f) => f.id === id)?.value ?? 0;
+/** Coins you get for releasing a fish into the light (2x after defeating God). */
+export const releaseReward = (id: string, doubleMoney = false) =>
+  (FISH.find((f) => f.id === id)?.value ?? 0) * (doubleMoney ? 2 : 1);
 
 export const fishById = (id: string) => FISH.find((f) => f.id === id);
 
@@ -64,7 +74,7 @@ export function removeFish(inv: Inventory, id: string): Inventory {
   return next;
 }
 
-// Shared pixel art (facing right). F = fin, B = body, L = belly, E = eye.
+// Shared pixel art (facing right). F = fin, B = body, L = belly, E = eye, W/S = angel wing.
 const FISH_GRID = [
   "....FF...",
   "F..BBBBB.",
@@ -72,17 +82,43 @@ const FISH_GRID = [
   "FFBLLLLBB",
   "F..LLLL..",
 ];
+const WINGED_FISH_GRID = [
+  "...WW....",
+  "..WWWS...",
+  ".F..BB...",
+  "FFBBBBBE.",
+  "FFBLLLLB.",
+  ".F.LLLL..",
+];
 export const FISH_W = FISH_GRID[0]!.length;
 export const FISH_H = FISH_GRID.length;
 
+export function fishDims(sp: FishSpecies) {
+  const grid = sp.winged ? WINGED_FISH_GRID : FISH_GRID;
+  return { w: grid[0]!.length, h: grid.length };
+}
+
 /** Pixels for a fish incl. a dark outline, relative to the grid's top-left (outline may go to -1). */
 export function fishPixels(sp: FishSpecies, facing = 1): [number, number, string][] {
+  const grid = sp.winged ? WINGED_FISH_GRID : FISH_GRID;
+  const w = grid[0]!.length;
   const filled = new Map<string, string>();
-  FISH_GRID.forEach((row, y) =>
+  grid.forEach((row, y) =>
     row.split("").forEach((c, x0) => {
       if (c === ".") return;
-      const x = facing >= 0 ? x0 : FISH_W - 1 - x0;
-      const col = c === "F" ? sp.fin : c === "B" ? sp.body : c === "L" ? sp.belly : "#1b140f";
+      const x = facing >= 0 ? x0 : w - 1 - x0;
+      const col =
+        c === "F"
+          ? sp.fin
+          : c === "B"
+            ? sp.body
+            : c === "L"
+              ? sp.belly
+              : c === "W"
+                ? "#f4f2fb"
+                : c === "S"
+                  ? "#c8c4dc"
+                  : "#1b140f";
       filled.set(`${x},${y}`, col);
     }),
   );
