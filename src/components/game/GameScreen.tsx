@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, VIEW_H, type HudState, type Key } from "@/game/engine";
-import { initAudio, setMuted, setVolume } from "@/game/sfx";
+import { playMusic, setMusicMuted, setMusicVolume } from "@/game/music";
+import { AUTOSAVE_SECONDS, SAVE_KEY, parseSave, type SaveData } from "@/game/save";
+import { initAudio, setMuted, setVolume, sfx } from "@/game/sfx";
 import { PixelIcon } from "./PixelIcon";
 import { InventoryPanel } from "./Inventory";
 import { GameButton } from "./GameButton";
@@ -33,6 +35,8 @@ export function GameScreen() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [menu, setMenu] = useState<"main" | "pause" | "settings" | null>("main");
   const [ready, setReady] = useState(false);
+  const [savedGame, setSavedGame] = useState<SaveData | null>(null);
+  const [saveNotice, setSaveNotice] = useState(false);
   const menuRef = useRef(menu);
   const settingsRef = useRef(settings);
   menuRef.current = menu;
@@ -49,20 +53,71 @@ export function GameScreen() {
 
   useEffect(() => {
     try { setSettings(parseSettings(localStorage.getItem(SETTINGS_STORAGE_KEY))); } catch { /* Browser storage may be unavailable. */ }
+    try { setSavedGame(parseSave(localStorage.getItem(SAVE_KEY))); } catch { /* Browser storage may be unavailable. */ }
     setReady(true);
   }, []);
 
   useEffect(() => {
     setMuted(!settings.sound);
     setVolume(settings.volume);
+    setMusicMuted(!settings.music);
+    setMusicVolume(settings.volume);
     gameRef.current?.setLabels({ act: primaryLabel(settings.keys, "act"), jump: primaryLabel(settings.keys, "jump"), down: primaryLabel(settings.keys, "down"), attack: primaryLabel(settings.keys, "attack") });
     if (ready) { try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch { /* Settings still work for this session. */ } }
   }, [settings, ready]);
 
   useEffect(() => {
+    if (!started || hud?.dead) {
+      playMusic(null);
+      return;
+    }
+    playMusic(hud?.scene === "dungeon" ? "dungeon" : "forest");
+  }, [started, hud?.dead, hud?.scene]);
+
+  useEffect(() => {
     gameRef.current?.setPaused(menu !== null || invOpen);
     gameRef.current?.clearKeys();
   }, [menu, invOpen]);
+
+  const saveGame = useCallback(() => {
+    const g = gameRef.current;
+    if (!g || !startedRef.current || deadRef.current) return false;
+    const snap = g.snapshot();
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(snap));
+      setSavedGame(snap);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!started || menu !== null || hud?.dead) return;
+    const id = window.setInterval(() => {
+      saveGame();
+    }, AUTOSAVE_SECONDS * 1000);
+    return () => window.clearInterval(id);
+  }, [started, menu, hud?.dead, saveGame]);
+
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") saveGame();
+    };
+    const onUnload = () => saveGame();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onUnload);
+    };
+  }, [saveGame]);
+
+  useEffect(() => {
+    if (!saveNotice) return;
+    const id = window.setTimeout(() => setSaveNotice(false), 2000);
+    return () => window.clearTimeout(id);
+  }, [saveNotice]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,6 +129,7 @@ export function GameScreen() {
     const fit = () => {
       const cw = wrap.clientWidth;
       const ch = wrap.clientHeight;
+      if (!cw || !ch) return;
       const internalW = Math.max(280, Math.min(560, Math.round((VIEW_H * cw) / ch)));
       game.resize(internalW);
       const scale = Math.min(cw / internalW, ch / VIEW_H);
@@ -98,6 +154,7 @@ export function GameScreen() {
       const action = actionForCode(settingsRef.current.keys, e.code);
       if (!action) return;
       e.preventDefault();
+      initAudio();
       if (action === "bag") {
         if (e.repeat) return;
         game.clearKeys();
@@ -114,6 +171,7 @@ export function GameScreen() {
     window.addEventListener("blur", blur);
     return () => {
       ro.disconnect();
+      playMusic(null);
       game.destroy();
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
@@ -128,6 +186,23 @@ export function GameScreen() {
     setStarted(true);
     setMenu(null);
   }, []);
+
+  const newGame = useCallback(() => {
+    initAudio();
+    setInvOpen(false);
+    gameRef.current?.restart();
+    setStarted(true);
+    setMenu(null);
+  }, []);
+
+  const continueGame = useCallback(() => {
+    if (!savedGame) return;
+    initAudio();
+    setInvOpen(false);
+    gameRef.current?.loadSave(savedGame);
+    setStarted(true);
+    setMenu(null);
+  }, [savedGame]);
 
   const restart = useCallback(() => {
     initAudio();
@@ -149,12 +224,20 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [hud?.dead, restart]);
 
+  const manualSave = () => {
+    initAudio();
+    sfx.menu();
+    if (saveGame()) setSaveNotice(true);
+  };
+
   const toggleMute = () => setSettings((current) => ({ ...current, sound: !current.sound }));
   const exitToMenu = () => {
+    saveGame();
     gameRef.current?.stop();
     gameRef.current?.clearKeys();
     setStarted(false);
     setInvOpen(false);
+    setSaveNotice(false);
     setMenu("main");
   };
 
@@ -168,6 +251,8 @@ export function GameScreen() {
     onPointerLeave: () => gameRef.current?.setKey(k, false),
     onPointerCancel: () => gameRef.current?.setKey(k, false),
   });
+
+  const bagCount = hud ? hud.inventory.reduce((n, f) => n + f.count, 0) : 0;
 
   return (
     <main className="fixed inset-0 flex select-none items-center justify-center overflow-hidden bg-background">
@@ -184,50 +269,50 @@ export function GameScreen() {
                 <Bar value={hud.hunger} icon="apple" label="Hunger" fill="bg-hunger" dim="bg-hunger-dim" warn={hud.hunger < 20} />
               </div>
 
-              {/* Top-right exploration */}
-              <div className="game-hud pixel-panel absolute right-2 top-2 flex flex-col items-end gap-1 px-2 py-2 text-right sm:right-3 sm:top-3 sm:px-3">
-                <div className="flex items-center gap-2 font-display text-[10px] text-foreground">
-                  <PixelIcon name="shroom" size={16} />
-                  <span>
-                    {hud.found}/{hud.total} villages
+              {/* Compact coin + utility bar */}
+              <div className="pixel-panel absolute left-2 top-[76px] flex items-center gap-2.5 px-2.5 py-1.5 sm:left-3 sm:top-[100px] sm:gap-3 sm:px-3">
+                <div aria-label={`${hud.coins} coins`} className="flex items-center gap-1.5 pr-0.5">
+                  <PixelIcon name="coin" size={18} />
+                  <span className="font-display text-xs tabular-nums text-accent drop-shadow-[2px_2px_0_var(--color-border)] sm:text-sm">
+                    {hud.coins}
                   </span>
                 </div>
-                {hud.compass ? (
-                  <div className="exploration-detail text-lg leading-none text-accent">
-                    {hud.compass.dir < 0 ? "◀ " : ""}
-                    {hud.compass.name} · {hud.compass.steps} steps
-                    {hud.compass.dir > 0 ? " ▶" : ""}
-                  </div>
-                ) : (
-                  <div className="exploration-detail text-lg leading-none text-accent">Every village found!</div>
+                {hud.doubleJump && (
+                  <span title="Double jump unlocked" aria-label="Double jump unlocked" className="text-lg leading-none text-secondary-foreground">
+                    ↑↑
+                  </span>
                 )}
-                <div className="flex flex-wrap items-center justify-end gap-2 text-base leading-none text-muted-foreground">
-                  <span className="exploration-detail">{hud.scene === "room" ? "Indoors" : hud.scene === "dungeon" ? "Elder Tree" : hud.timeOfDay}</span>
-                  <span>·</span>
-                  <span className="exploration-detail">{hud.applesEaten} apples eaten</span>
-                  <span>·</span>
-                  <GameButton
-                    variant="plain"
-                    onClick={() => {
-                      gameRef.current?.clearKeys();
-                      setInvOpen((o) => !o);
-                    }}
-                    className="text-foreground underline-offset-2 hover:underline"
-                  >
-                    fish bag ({hud.inventory.reduce((n, f) => n + f.count, 0)})
-                  </GameButton>
-                  <GameButton variant="plain" onClick={toggleMute} aria-label={settings.sound ? "Mute sound" : "Enable sound"} className="px-1 text-foreground">
-                    {settings.sound ? "♪" : "♫×"}
-                  </GameButton>
+                <GameButton
+                  variant="plain"
+                  aria-label={`Open fish bag (${bagCount})`}
+                  title="Fish bag (I / Tab)"
+                  onClick={() => {
+                    gameRef.current?.clearKeys();
+                    setInvOpen((o) => !o);
+                  }}
+                  className="flex items-center gap-1 px-1 text-base leading-none text-foreground hover:text-accent"
+                >
+                  <PixelIcon name="bag" size={16} />
+                  <span className="tabular-nums">{bagCount}</span>
+                </GameButton>
+                <GameButton
+                  variant="plain"
+                  onClick={toggleMute}
+                  aria-label={settings.sound ? "Mute sound" : "Enable sound"}
+                  className="px-1 text-base leading-none text-foreground hover:text-accent"
+                >
+                  {settings.sound ? "♪" : "♫×"}
+                </GameButton>
+                <GameButton aria-label="Pause game" onClick={() => setMenu("pause")} className="px-2 py-1 text-xs leading-none">
+                  Ⅱ
+                </GameButton>
+              </div>
+              {hud.coinPop && (
+                <div key={hud.coinPop.id} className="animate-banner pointer-events-none absolute left-4 top-[138px] flex items-center gap-1.5 font-display text-sm text-accent drop-shadow-[2px_2px_0_var(--color-border)] sm:top-[152px]">
+                  <PixelIcon name="coin" size={16} />
+                  <span>+{hud.coinPop.amount}</span>
                 </div>
-              </div>
-
-              <div className="pixel-panel absolute left-2 top-[78px] flex items-center gap-3 px-3 py-1 text-xl sm:top-[100px]">
-                <span aria-label={`${hud.coins} coins`} className="text-accent">◉ {hud.coins}</span>
-                {hud.doubleJump && <span title="Double jump unlocked" aria-label="Double jump unlocked" className="text-secondary-foreground">↑↑</span>}
-                <GameButton aria-label="Pause game" onClick={() => setMenu("pause")} className="px-2 py-1 text-xs">Ⅱ</GameButton>
-              </div>
-              {hud.coinPop && <div key={hud.coinPop.id} className="animate-banner pointer-events-none absolute left-4 top-[140px] text-2xl text-accent">+{hud.coinPop.amount} coins</div>}
+              )}
               {hud.boss && <div className="pixel-panel absolute bottom-14 left-1/2 w-[min(80%,320px)] -translate-x-1/2 px-4 py-2 text-center"><div className="mb-2 font-display text-xs text-accent">Beetle King</div><div className="flex gap-1">{Array.from({ length: hud.boss.max }, (_, i) => <div key={i} className={`h-3 flex-1 ${i < (hud.boss?.hp ?? 0) ? "bg-health" : "bg-health-dim"}`} />)}</div></div>}
 
               {/* Village banner */}
@@ -304,10 +389,29 @@ export function GameScreen() {
           {menu !== null && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60">
               {menu === "settings" ? <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setMenu(started ? "pause" : "main")} /> : (
-                <div className="flex max-h-full flex-col items-center gap-4 overflow-y-auto px-6 py-4 text-center">
+                <div className="flex max-h-full flex-col items-center gap-3 overflow-y-auto px-6 py-4 text-center">
                   <div className="animate-bob"><PixelIcon name="shroom" size={48} /></div>
                   <h1 className="font-display text-2xl text-accent drop-shadow-[4px_4px_0_var(--color-border)] sm:text-4xl">{menu === "main" ? "SPORELING" : "Paused"}</h1>
-                  <GameButton disabled={!ready} onClick={start} className="w-56 px-6 py-4 text-sm">{menu === "main" ? "Play" : "Resume"}</GameButton>
+                  {menu === "main" && savedGame ? (
+                    <>
+                      <GameButton disabled={!ready} onClick={continueGame} className="w-56 px-6 py-4 text-sm">
+                        Continue
+                      </GameButton>
+                      <div className="text-base leading-none text-muted-foreground">
+                        {savedGame.discovered.length}/7 villages · {savedGame.coins} coins
+                      </div>
+                      <GameButton disabled={!ready} onClick={newGame} className="w-56 px-6 py-3 text-xs">
+                        New game
+                      </GameButton>
+                    </>
+                  ) : (
+                    <GameButton disabled={!ready} onClick={start} className="w-56 px-6 py-4 text-sm">{menu === "main" ? "Play" : "Resume"}</GameButton>
+                  )}
+                  {menu === "pause" && (
+                    <GameButton onClick={manualSave} className="w-56 px-6 py-3 text-xs">
+                      {saveNotice ? "Saved!" : "Save game"}
+                    </GameButton>
+                  )}
                   <GameButton onClick={() => setMenu("settings")} className="w-56 px-6 py-4 text-sm">Settings</GameButton>
                   {menu === "pause" && <GameButton onClick={exitToMenu} className="w-56 px-4 py-4 text-xs">Exit to main menu</GameButton>}
                 </div>
