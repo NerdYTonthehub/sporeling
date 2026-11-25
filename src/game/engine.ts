@@ -384,6 +384,19 @@ export class Game {
     this.running = true;
   }
 
+  /** Respawn after dying without losing coins, inventory, villages, double jump, or world progress. */
+  respawn() {
+    const snap = this.snapshot();
+    this.loadSave({
+      ...snap,
+      health: 100,
+      hunger: 100,
+      x: START_X,
+      y: this.groundAt(START_X),
+    });
+    this.showToast("Your progress was saved!");
+  }
+
   setKey(k: Key, down: boolean) {
     if (down && !this.keys[k]) this.pressed.add(k);
     this.keys[k] = down;
@@ -413,13 +426,15 @@ export class Game {
   /** Progress snapshot for the save system (forest position; indoors/dungeon resume at the door). */
   snapshot(): SaveData {
     const inForest = this.scene === "forest";
+    const x = this.dead ? START_X : Math.round(inForest ? this.p.x : this.returnPos.x);
+    const y = this.dead ? this.groundAt(START_X) : Math.round(inForest ? this.p.y : this.returnPos.y);
     return {
       v: SAVE_VERSION,
       savedAt: Date.now(),
-      x: Math.round(inForest ? this.p.x : this.returnPos.x),
-      y: Math.round(inForest ? this.p.y : this.returnPos.y),
-      health: this.vitals.health,
-      hunger: this.vitals.hunger,
+      x,
+      y,
+      health: this.dead ? 100 : this.vitals.health,
+      hunger: this.dead ? Math.max(60, this.vitals.hunger) : this.vitals.hunger,
       coins: this.coins,
       inventory: { ...this.inventory },
       fishCaught: this.fishCaught,

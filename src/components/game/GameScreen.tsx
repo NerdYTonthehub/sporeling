@@ -84,7 +84,7 @@ export function GameScreen() {
 
   const saveGame = useCallback(() => {
     const g = gameRef.current;
-    if (!g || !startedRef.current || deadRef.current) return false;
+    if (!g || !startedRef.current) return false;
     const snap = g.snapshot();
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(snap));
@@ -94,6 +94,10 @@ export function GameScreen() {
       return false;
     }
   }, []);
+
+  useEffect(() => {
+    if (hud?.dead) saveGame();
+  }, [hud?.dead, saveGame]);
 
   useEffect(() => {
     if (!started || menu !== null || hud?.dead) return;
@@ -220,8 +224,9 @@ export function GameScreen() {
   const restart = useCallback(() => {
     initAudio();
     setInvOpen(false);
-    gameRef.current?.restart();
-  }, []);
+    gameRef.current?.respawn();
+    saveGame();
+  }, [saveGame]);
 
   const releaseFish = useCallback((id: string) => {
     initAudio();
