@@ -166,9 +166,9 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
     npcs: [
       ["Elder Morel", "#8a5a3a", false, 1.15, [
         "Welcome, little sprout. The forest is very big and you are very small.",
-        "Behind you lies the Great Lake. Nobody has ever reached the other side.",
-        "Our cousins live in villages far to the east. Go and find them!",
-        "Rest by our campfire whenever you feel bruised.",
+        "Behind you lies the Great Lake. You can fish right off its wooden pier!",
+        "Sit on the logs around any campfire with E to travel between our villages.",
+        "Snail folk also live way up in the treetops, and Truffle Deep lies far to the east!",
       ]],
       ["Pip", "#e07aa0", true, 0.85, [
         "Apples! The little trees grow apples. Press E next to one to munch it.",
@@ -181,63 +181,12 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
     ],
   },
   {
-    name: "Gillhollow",
-    x: 5200,
-    npcs: [
-      ["Inky", "#3b3f52", false, 1, [
-        "You walked all the way from Mossbottom? On those tiny legs?",
-        "My grandmother says the oldest tree reaches up past the sky.",
-        "Snail folk live way up in the treetops, in big curly shells. Rope bridges link every trunk up there.",
-      ]],
-      ["Lady Amanita", "#c8302a", true, 1.1, [
-        "Charmed, I'm sure. Do mind the moss, it's freshly combed.",
-        "There's a village of puffballs further east. Terribly round folk.",
-      ]],
-      ["Button", "#e9dcc4", false, 0.75, [
-        "I'm the smallest mushroom in Gillhollow. Well, until you showed up.",
-      ]],
-    ],
-  },
-  {
-    name: "Puffington",
-    x: 9600,
-    npcs: [
-      ["Old Puff", "#efe6d2", false, 1.2, [
-        "Hrrm. A traveler. We don't get many of those. Have a sit by the fire.",
-        "Keep going east and you'll find Spindlewood. Past that is Truffle Deep, the last village before the Elder Tree.",
-      ]],
-      ["Shiitake Sam", "#7a4a2a", false, 1, [
-        "I collect pebbles. This one is my favourite. It's round.",
-        "Eat an apple before you go. The next stretch is long.",
-      ]],
-      ["Enoki", "#f3eedc", false, 0.8, [
-        "Hi! Hi! Are you a mushroom too? You look like a mushroom!",
-      ]],
-    ],
-  },
-  {
-    name: "Spindlewood",
-    x: 12900,
-    npcs: [
-      ["Weaver Wren", "#b8572e", true, 1, [
-        "Spindlewood! We spin rope for the treetop bridges. The snails up there are our best customers.",
-        "Those bridges are twice as high as you'd think. Don't look down!",
-      ]],
-      ["Spindle", "#efe6d2", false, 0.85, [
-        "I counted the steps from Mossbottom once. I fell asleep halfway.",
-      ]],
-      ["Burl", "#6b4a35", false, 1.15, [
-        "Truffle Deep is still a long walk east. Pack an apple or three.",
-      ]],
-    ],
-  },
-  {
     name: "Truffle Deep",
     x: 16200,
     npcs: [
       ["Grand Truffle", "#4a3426", false, 1.25, [
-        "So. You found all of us. Not bad for such a small sprout.",
-        "Every mushroom village is connected by roots underground. We're all one family.",
+        "So. You made it all the way to Truffle Deep. Not bad for such a small sprout.",
+        "Every village is connected by roots underground — sit on a campfire log to jump back anytime!",
         "You are always welcome here. Now rest, wanderer.",
       ]],
       ["Bluefoot", "#3e7fb8", false, 1, [
@@ -280,6 +229,8 @@ const TREE_VILLAGE_DEFS: { name: string; near: number; npcs: [string, string, bo
     ],
   },
 ];
+
+export const TOTAL_VILLAGES = VILLAGE_DEFS.length + TREE_VILLAGE_DEFS.length;
 
 const SHELLS = ["#c98a4a", "#b86a8a", "#d9b46a", "#8a6a9a", "#c76a4a"];
 const CAPS = ["#d9443a", "#c8302a", "#e8a33a", "#8a5a3a", "#efe6d2", "#3e7fb8", "#b8572e", "#6b4a35"];

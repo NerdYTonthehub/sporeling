@@ -72,6 +72,8 @@ export interface PersonOpts {
   blink?: boolean;
   /** Both arms raised high above the cap (holding something up). */
   armsUp?: boolean;
+  /** Seated on a campfire log. */
+  sitting?: boolean | undefined;
   /** side (default), front = facing the camera, back = facing away (top-down rooms). */
   view?: "side" | "front" | "back";
 }
@@ -82,7 +84,7 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
   const f = o.facing >= 0 ? 1 : -1;
   const bodyW = s >= 1.1 ? 10 : s < 0.85 ? 6 : 8;
   const bodyH = Math.max(5, Math.round(7 * s));
-  const legH = 3;
+  const legH = o.sitting ? 2 : 3;
   let capW = Math.round(14 * s);
   if (capW % 2) capW++;
   const capH = Math.max(4, Math.round(6 * s));
@@ -95,7 +97,10 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
 
   const parts: R[] = [];
   // legs + shoes
-  if (o.air) {
+  if (o.sitting) {
+    parts.push([x - 1, bodyBottom, 2, 1, LEG], [x + f * 2, bodyBottom, 2, 1, LEG]);
+    parts.push([x + f * 2, bodyBottom + 1, 2, 1, SHOE]);
+  } else if (o.air) {
     parts.push([x - 2, bodyBottom, 1, 2, LEG], [x + 1, bodyBottom, 1, 2, LEG]);
     parts.push([x - 3, bodyBottom + 2, 2, 1, SHOE], [x + 1, bodyBottom + 2, 2, 1, SHOE]);
   } else {
