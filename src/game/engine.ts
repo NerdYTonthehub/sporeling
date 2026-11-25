@@ -222,6 +222,7 @@ export class Game {
   private hasDoubleJump = false;
   private airJumps = 0;
   private attackT = 0;
+  private attackDur = ATTACK_TIME;
   private attackCd = 0;
   private swingHits = new Set<object>();
   private paused = false;
@@ -234,6 +235,7 @@ export class Game {
   private holyTries = 0;
   private sacrificedFish: string[] = [];
   private releasingKind: "coin" | "heaven" = "coin";
+  private worldSeed = 1337;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -247,8 +249,9 @@ export class Game {
   }
 
   // ---------- lifecycle ----------
-  reset(doorTreeIdx?: number) {
-    const { world, groundY } = generateWorld(1337, doorTreeIdx);
+  reset(doorTreeIdx?: number, worldSeed?: number) {
+    this.worldSeed = worldSeed ?? (1 + Math.floor(Math.random() * 0x7ffffffe));
+    const { world, groundY } = generateWorld(this.worldSeed, doorTreeIdx);
     this.world = world;
     const ground = new Int16Array(WORLD_W + 1);
     for (let x = 0; x <= WORLD_W; x++) ground[x] = groundY(x);
@@ -397,12 +400,13 @@ export class Game {
       holyTries: this.holyTries,
       sacrificedFish: this.sacrificedFish.slice(-60),
       doorTreeIdx: Math.max(0, this.world.trees.indexOf(this.world.elder)),
+      worldSeed: this.worldSeed,
     };
   }
 
   /** Start a fresh world and apply a save on top of it. */
   loadSave(s: SaveData) {
-    this.reset(s.doorTreeIdx);
+    this.reset(s.doorTreeIdx, s.worldSeed);
     this.vitals = { health: s.health, hunger: s.hunger };
     this.coins = s.coins;
     this.inventory = { ...s.inventory };
@@ -551,22 +555,26 @@ export class Game {
     const locked = this.mode !== "walk" || !!this.fade;
     const jumpPressed = this.pressed.has("jump") || this.pressed.has("up");
     const prevX = p.x;
+    const speedMul = this.scene === "heaven" ? 1.55 : 1;
+    const maxSpeed = MAX_SPEED * speedMul;
+    const accel = ACCEL * speedMul;
+    const friction = FRICTION * speedMul;
 
     if (active) {
       const dir = locked ? 0 : (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
-      const over = Math.abs(p.vx) > MAX_SPEED;
+      const over = Math.abs(p.vx) > maxSpeed;
       if (dir) {
-        p.vx += dir * ACCEL * dt;
+        p.vx += dir * accel * dt;
         p.facing = dir;
       } else {
-        const fr = FRICTION * dt;
+        const fr = friction * dt;
         p.vx = Math.abs(p.vx) <= fr ? 0 : p.vx - Math.sign(p.vx) * fr;
       }
       if (over) {
         // knockback decays back to normal walking speed
-        p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - MAX_SPEED, 900 * dt);
+        p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - maxSpeed, 900 * dt);
       } else {
-        p.vx = clamp(p.vx, -MAX_SPEED, MAX_SPEED);
+        p.vx = clamp(p.vx, -maxSpeed, maxSpeed);
       }
       if (!locked && jumpPressed) p.jumpBuf = 0.12;
       if (!locked && this.pressed.has("down") && p.plat) {
@@ -678,6 +686,9 @@ export class Game {
       p.plat = null;
     }
     if (p.onGround && Math.abs(p.vx) > 4) p.walkT += dt * (Math.abs(p.vx) / MAX_SPEED);
+    if (this.scene === "heaven" && Math.abs(p.vx) > 72 && Math.random() < dt * 18) {
+      this.spawn({ x: p.x - p.facing * 4, y: p.y - 3 - Math.random() * 8, vx: -p.facing * 12, vy: -4, life: 0.25, color: "#fff6c4", size: 1, grav: 0, kind: "spark" });
+    }
     // fell off the pier into the lake: splash back onto the shore
     if (this.scene === "forest" && p.x < LAKE_EDGE && !p.plat && p.y >= LAKE_Y - 0.5 && active && !this.fade) {
       sfx.splash();
@@ -983,8 +994,10 @@ export class Game {
   // ---------- combat ----------
   private startAttack() {
     const p = this.p;
-    this.attackT = ATTACK_TIME;
-    this.attackCd = ATTACK_COOLDOWN;
+    const inHeaven = this.scene === "heaven";
+    this.attackDur = inHeaven ? ATTACK_TIME * 0.72 : ATTACK_TIME;
+    this.attackT = this.attackDur;
+    this.attackCd = inHeaven ? ATTACK_COOLDOWN * 0.65 : ATTACK_COOLDOWN;
     this.swingHits = new Set();
     sfx.swing();
     void p;
@@ -1274,10 +1287,9 @@ export class Game {
 
   private updateShockwaves(dt: number, active: boolean) {
     const p = this.p;
-    const speed = this.scene === "heaven" ? 165 : 120;
     this.shockwaves = this.shockwaves.filter((w) => {
       w.t += dt;
-      w.x += w.dir * speed * dt;
+      w.x += w.dir * 120 * dt;
       const g = this.groundAt(w.x);
       if (active && p.invuln <= 0 && Math.abs(p.x - w.x) < 6 && p.y > g - 7) this.hurt(SHOCKWAVE_DAMAGE, w.x - w.dir * 10);
       return w.t < 1.8;
@@ -1681,13 +1693,13 @@ export class Game {
     const g = h.god;
     if (g.hp <= 0 || g.hitT > 0) return;
     g.hp = Math.max(0, g.hp - amount);
-    g.hitT = 0.25;
+    g.hitT = 0.35;
     this.shakeT = 0.2;
     sfx.bossHit();
     this.bits(g.x, g.y - 24, 10, "#ffe46b", "#f4f2fb");
     if (g.hp <= 0) {
       g.phase = "defeated";
-      h.defeatTimer = 2.4;
+      h.defeatTimer = 3.2;
       h.bombs = [];
       g.beamActive = false;
       const outcome = applyHolyTryOutcome(this.inventory, this.holyTries, true);
@@ -1758,61 +1770,63 @@ export class Game {
     switch (g.phase) {
       case "arrive": {
         g.x = Math.round(h.w / 2);
-        g.y += (82 - g.y) * Math.min(1, dt * 4);
+        g.y += (82 - g.y) * Math.min(1, dt * 2.5);
         g.timer -= dt;
         if (g.timer <= 0) {
           g.phase = "hover";
-          g.timer = 0.5;
+          g.timer = 0.9;
           sfx.gate();
-          this.banner = { title: "Goldfish of Destruction", sub: "Also known as God", t: 2.5 };
+          this.banner = { title: "Goldfish of Destruction", sub: "Also known as God", t: 3 };
         }
         break;
       }
       case "hover": {
-        const tx = h.w / 2 + Math.sin(h.t * 2.4) * Math.min(58, h.w * 0.2);
-        const ty = 78 + Math.sin(h.t * 3.6) * 7;
-        g.x += (tx - g.x) * Math.min(1, dt * 5.5);
-        g.y += (ty - g.y) * Math.min(1, dt * 5.5);
+        const tx = h.w / 2 + Math.sin(h.t * 1.4) * Math.min(50, h.w * 0.16);
+        const ty = 78 + Math.sin(h.t * 2.4) * 6;
+        g.x += (tx - g.x) * Math.min(1, dt * 3);
+        g.y += (ty - g.y) * Math.min(1, dt * 3);
         g.timer -= dt;
         if (g.timer <= 0 && canFight) {
-          const next = nextGodAttack(g.attackIdx++);
+          const next = nextGodAttack(g.lastAttack);
+          g.lastAttack = next;
+          g.attackIdx++;
           g.phase = next;
           g.sub = "windup";
           if (next === "fish_bombs") {
-            g.timer = 0.32;
+            g.timer = 0.55;
             g.bombsLeft = 5;
             g.bombCd = 0;
           } else if (next === "hand_smash") {
-            g.timer = 0.45;
+            g.timer = 0.7;
             g.handSide = p.x >= g.x ? 1 : -1;
             g.handX = clamp(p.x, 38, h.w - 38);
             g.handY = 66;
             g.smashHit = false;
           } else if (next === "light_beam") {
             const bounds = beamBounds(h.w);
-            g.beamDir = g.attackIdx % 2 === 0 ? 1 : -1;
+            g.beamDir = Math.random() < 0.5 ? 1 : -1;
             g.beamX = g.beamDir > 0 ? bounds.minX : bounds.maxX;
             g.beamActive = true;
-            g.timer = 0.55;
+            g.timer = 0.9;
           } else if (next === "dash") {
             const startLeft = p.x > h.w / 2;
             g.dashDir = startLeft ? 1 : -1;
             g.x = startLeft ? 34 : h.w - 34;
             g.dashTargetX = startLeft ? h.w - 34 : 34;
             g.y = h.floorY;
-            g.timer = 0.4;
+            g.timer = 0.65;
           }
         }
         break;
       }
       case "fish_bombs": {
-        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 5);
-        g.y += (72 - g.y) * Math.min(1, dt * 5);
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 3);
+        g.y += (72 - g.y) * Math.min(1, dt * 3);
         if (g.sub === "windup") {
           g.timer -= dt;
           if (g.timer <= 0) {
             g.sub = "strike";
-            g.timer = 0.45;
+            g.timer = 0.8;
           }
         } else {
           g.bombCd -= dt;
@@ -1822,17 +1836,17 @@ export class Game {
             const dx = tx - g.x;
             const dy = h.floorY - 4 - (g.y - 22);
             const len = Math.hypot(dx, dy) || 1;
-            const spd = 195;
+            const spd = 140;
             h.bombs.push({ x: g.x, y: g.y - 22, vx: (dx / len) * spd, vy: (dy / len) * spd, t: 0, exploded: false });
             sfx.cast();
             g.bombsLeft--;
-            g.bombCd = 0.18;
+            g.bombCd = 0.28;
           }
           if (g.bombsLeft <= 0) {
             g.timer -= dt;
             if (g.timer <= 0) {
               g.phase = "hover";
-              g.timer = 0.5;
+              g.timer = 1.0;
             }
           }
         }
@@ -1841,19 +1855,19 @@ export class Game {
       case "hand_smash": {
         if (g.sub === "windup") {
           const target = clamp(p.x, 38, h.w - 38);
-          g.handX += (target - g.handX) * Math.min(1, dt * 8);
-          g.x += (g.handX - g.handSide * 22 - g.x) * Math.min(1, dt * 6.5);
-          g.y += (84 - g.y) * Math.min(1, dt * 6);
+          g.handX += (target - g.handX) * Math.min(1, dt * 5);
+          g.x += (g.handX - g.handSide * 22 - g.x) * Math.min(1, dt * 4);
+          g.y += (84 - g.y) * Math.min(1, dt * 4);
           g.handY = g.y - 20;
           g.timer -= dt;
           if (g.timer <= 0) g.sub = "strike";
         } else if (g.sub === "strike") {
-          g.handY += 640 * dt;
+          g.handY += 440 * dt;
           if (g.handY >= h.floorY - 9) {
             g.handY = h.floorY - 9;
             if (!g.smashHit) {
               g.smashHit = true;
-              this.shakeT = 0.4;
+              this.shakeT = 0.45;
               sfx.gate();
               this.dust(g.handX - 10, h.floorY, 7);
               this.dust(g.handX + 10, h.floorY, 7);
@@ -1863,21 +1877,21 @@ export class Game {
               }
             }
             g.sub = "recover";
-            g.timer = 0.35;
+            g.timer = 0.55;
           }
         } else {
-          g.handY += (g.y - 20 - g.handY) * Math.min(1, dt * 9);
+          g.handY += (g.y - 20 - g.handY) * Math.min(1, dt * 6);
           g.timer -= dt;
           if (g.timer <= 0) {
             g.phase = "hover";
-            g.timer = 0.45;
+            g.timer = 0.9;
           }
         }
         break;
       }
       case "light_beam": {
-        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 6);
-        g.y += (66 - g.y) * Math.min(1, dt * 6);
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 4);
+        g.y += (66 - g.y) * Math.min(1, dt * 4);
         if (g.sub === "windup") {
           g.timer -= dt;
           if (g.timer <= 0) {
@@ -1886,14 +1900,14 @@ export class Game {
           }
         } else {
           const bounds = beamBounds(h.w);
-          g.beamX += g.beamDir * 215 * dt;
+          g.beamX += g.beamDir * 140 * dt;
           if (canFight && p.invuln <= 0 && beamHitsPlayer(g.beamX, p.x)) {
             this.hurt(GOD_BEAM_DAMAGE, g.beamX);
           }
           if ((g.beamDir > 0 && g.beamX >= bounds.maxX) || (g.beamDir < 0 && g.beamX <= bounds.minX)) {
             g.beamActive = false;
             g.phase = "hover";
-            g.timer = 0.5;
+            g.timer = 1.0;
           }
         }
         break;
@@ -1907,7 +1921,7 @@ export class Game {
             sfx.swing();
           }
         } else if (g.sub === "strike") {
-          g.x += g.dashDir * 285 * dt;
+          g.x += g.dashDir * 205 * dt;
           if (canFight) {
             if (stompHitsDashGod(g, p.x, p.y, p.vy)) {
               this.damageGod(1);
@@ -1922,14 +1936,14 @@ export class Game {
           if ((g.dashDir > 0 && g.x >= g.dashTargetX) || (g.dashDir < 0 && g.x <= g.dashTargetX)) {
             g.x = g.dashTargetX;
             g.sub = "recover";
-            g.timer = 0.3;
+            g.timer = 0.45;
           }
         } else {
-          g.y += (82 - g.y) * Math.min(1, dt * 7);
+          g.y += (82 - g.y) * Math.min(1, dt * 5);
           g.timer -= dt;
           if (g.timer <= 0) {
             g.phase = "hover";
-            g.timer = 0.5;
+            g.timer = 1.0;
           }
         }
         break;
@@ -1954,6 +1968,7 @@ export class Game {
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,
+        attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
       });
     }
     drawHeavenFrontClouds(ctx, h, this.W);
@@ -2129,7 +2144,17 @@ export class Game {
     this.drawShockwaves(cx, cy);
     const p = this.p;
     if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
-      drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), { facing: p.facing, walk: p.walkT, moving: Math.abs(p.vx) > 4, air: !p.onGround, cap: "#d9443a", spots: true, scale: 1, blink: this.dead || p.blinkT < 0 });
+      drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), {
+        facing: p.facing,
+        walk: p.walkT,
+        moving: Math.abs(p.vx) > 4,
+        air: !p.onGround,
+        cap: "#d9443a",
+        spots: true,
+        scale: 1,
+        blink: this.dead || p.blinkT < 0,
+        attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
+      });
     }
     this.drawAttack(cx, cy);
     this.drawParticles(cx, cy, false);
@@ -2168,31 +2193,37 @@ export class Game {
     }
   }
 
-  /** Wooden sword sweep: an arc from over the shoulder down to the front, with a pale swoosh trail. */
+  /** Wooden sword sweep: windup over the shoulder -> lunging slash arc with bright motion trail. */
   private drawAttack(cx: number, cy: number) {
     if (this.attackT <= 0) return;
     const p = this.p;
     const f = p.facing >= 0 ? 1 : -1;
-    const k = clamp(1 - this.attackT / ATTACK_TIME, 0, 1);
-    const ease = 1 - (1 - k) * (1 - k);
-    const A0 = -2.1;
-    const A1 = 0.9;
+    const k = clamp(1 - this.attackT / this.attackDur, 0, 1);
+    const ease = k < 0.2 ? k * 0.3 : 0.06 + (1 - Math.pow(1 - (k - 0.2) / 0.8, 2.2)) * 0.94;
+    const A0 = -2.35;
+    const A1 = 0.95;
     const ang = (u: number) => {
       const a = A0 + (A1 - A0) * u;
       return f > 0 ? a : Math.PI - a;
     };
-    const hx = Math.round(p.x - cx + f * 5);
-    const hy = Math.round(p.y - cy - 10);
+    const handOffX = k < 0.2 ? f * 2 : k < 0.75 ? f * 7 : f * 6;
+    const handOffY = k < 0.2 ? -12 : k < 0.65 ? -8 : -6;
+    const hx = Math.round(p.x - cx + handOffX);
+    const hy = Math.round(p.y - cy + handOffY);
     const ctx = this.ctx;
-    for (let i = 0; i < 14; i++) {
-      const u = ease - i * 0.035;
-      if (u < 0) break;
-      const a = ang(u);
-      ctx.globalAlpha = 0.55 * (1 - i / 14);
-      rect(ctx, "#fff6d8", Math.round(hx + Math.cos(a) * 13), Math.round(hy + Math.sin(a) * 13), 2, 1);
-      rect(ctx, "#f3e2b0", Math.round(hx + Math.cos(a) * 10), Math.round(hy + Math.sin(a) * 10), 1, 1);
+    if (k >= 0.16) {
+      for (let i = 0; i < 18; i++) {
+        const u = ease - i * 0.032;
+        if (u < 0) break;
+        const a = ang(u);
+        const fade = 1 - i / 18;
+        ctx.globalAlpha = 0.72 * fade;
+        rect(ctx, i < 5 ? "#ffffff" : "#ffe688", Math.round(hx + Math.cos(a) * 14), Math.round(hy + Math.sin(a) * 14), 2, 2);
+        ctx.globalAlpha = 0.45 * fade;
+        rect(ctx, "#f3e2b0", Math.round(hx + Math.cos(a) * 11), Math.round(hy + Math.sin(a) * 11), 2, 1);
+      }
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
     drawSword(ctx, hx, hy, ang(ease));
   }
 
@@ -2312,6 +2343,8 @@ export class Game {
         blink: this.dead || p.blinkT < 0,
         armsUp: this.mode === "releasing" && (this.releasing?.t ?? 0) > 0.15,
         sitting: this.mode === "sitting",
+        attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
+        fishing: this.mode === "fishing" && this.fishing ? { phase: this.fishing.phase, t: this.fishing.t } : undefined,
       });
       ctx.globalAlpha = 1;
     }
@@ -2793,20 +2826,29 @@ export class Game {
     const f = p.facing >= 0 ? 1 : -1;
     const fish = this.fishing;
     if (this.mode === "fishing" && fish) {
-      const hx = px + f * 5;
-      const hy = py - 6;
-      const tx = px + f * 14;
-      const ty = py - 18;
+      const castK = fish.phase === "wait" ? clamp(fish.t / 0.35, 0, 1) : 1;
+      const isCast = fish.phase === "wait" && fish.t < 0.35;
+      const isBite = fish.phase === "bite";
+      const idleBob = isBite ? (Math.floor(fish.t * 14) % 2 ? -1 : 1) : Math.round(Math.sin(fish.t * 2.6));
+      const hx = px + (isCast ? f * 6 : isBite ? f * 4 : f * 6);
+      const hy = py - (isCast ? 9 : 6) + idleBob;
+      const tx = px + (isCast ? Math.round(-f * 2 + f * 17 * castK) : isBite ? f * 12 : f * 15);
+      const ty = py - (isCast ? Math.round(21 - castK * 3) : isBite ? 15 + (Math.floor(this.time * 16) % 2) : 18 - idleBob);
       drawLine(ctx, hx, hy, tx, ty, "#2a1d14");
       drawLine(ctx, hx, hy - 1, tx - f, ty, "#8a6342");
       const wy = (fish.puddle === LAKE_FISHING_SPOT ? LAKE_Y : this.groundAt(fish.puddle.x)) - cy;
-      const bx = Math.round(fish.bobX - cx);
-      const dip = fish.phase === "bite" ? (Math.floor(this.time * 16) % 2) + 1 : Math.round(Math.sin(this.time * 3)) > 0 ? 0 : 1;
-      drawLine(ctx, tx, ty, bx, wy - 2 + dip, "#d9d2c0");
-      rect(ctx, "#1b140f", bx - 1, wy - 3 + dip, 3, 3);
-      rect(ctx, "#e0362c", bx, wy - 3 + dip, 1, 1);
-      rect(ctx, "#f8f2e4", bx, wy - 2 + dip, 1, 1);
-      if (fish.phase === "bite") {
+      const bxTarget = Math.round(fish.bobX - cx);
+      const bx = isCast ? Math.round(tx + (bxTarget - tx) * castK) : bxTarget;
+      const dip = isBite ? (Math.floor(this.time * 16) % 2) + 2 : Math.round(Math.sin(this.time * 3)) > 0 ? 0 : 1;
+      const by = isCast ? Math.round(ty + (wy - 2 - ty) * (castK * castK) - Math.sin(castK * Math.PI) * 10) : wy - 2 + dip;
+      drawLine(ctx, tx, ty, bx, by, "#d9d2c0");
+      rect(ctx, "#1b140f", bx - 1, by - 1, 3, 3);
+      rect(ctx, "#e0362c", bx, by - 1, 1, 1);
+      rect(ctx, "#f8f2e4", bx, by, 1, 1);
+      if (isBite) {
+        const sp = Math.floor(this.time * 14) % 2;
+        rect(ctx, "#ffffff", bx - 3 - sp, wy - 1, 2, 1);
+        rect(ctx, "#ffffff", bx + 2 + sp, wy - 1, 2, 1);
         const bob = Math.floor(this.time * 10) % 2;
         const ex = px - 1;
         const ey = py - 31 - bob;

@@ -24,6 +24,13 @@ describe("forest exploration", () => {
     });
     expect(new Set(xs).size).toBe(4);
   });
+  it("generates distinct terrain heights for different world seeds", () => {
+    const a = generateWorld(101, 0);
+    const b = generateWorld(202, 0);
+    const sampleXs = [1500, 3000, 6000, 9000, 12000, 15000];
+    const diffs = sampleXs.filter((x) => a.groundY(x) !== b.groundY(x));
+    expect(diffs.length).toBeGreaterThan(2);
+  });
   it("rope bridges join every neighboring tree's decks", () => {
     const { world } = generateWorld(1337);
     const bridges = world.platforms.filter((p) => p.kind === "bridge");
