@@ -9,6 +9,8 @@ describe("settings", () => {
     expect(actionForCode(DEFAULT_KEYS, "KeyE")).toBe("act");
     expect(actionForCode(DEFAULT_KEYS, "KeyI")).toBe("bag");
     expect(actionForCode(DEFAULT_KEYS, "KeyF")).toBe("attack");
+    expect(actionForCode(DEFAULT_KEYS, "ShiftLeft")).toBe("dash");
+    expect(actionForCode(DEFAULT_KEYS, "KeyC")).toBe("dash");
   });
 
   it("rebinding a key moves it so two actions never share a key", () => {

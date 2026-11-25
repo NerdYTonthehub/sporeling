@@ -49,9 +49,13 @@ describe("forest exploration", () => {
     expect(BOAT_FARE).toBe(100);
     expect(LIGHTHOUSE_X).toBeGreaterThan(820);
     const shore = generateAntShore(1337);
-    expect(shore.anthills.length).toBeGreaterThanOrEqual(7);
-    expect(shore.ants.length).toBeGreaterThanOrEqual(20);
+    expect(shore.anthills.length).toBeGreaterThanOrEqual(6);
+    expect(shore.ants.length).toBeGreaterThanOrEqual(15);
     expect(shore.decor.some((d) => d.kind === "deadgrass")).toBe(true);
+    expect(shore.fatAntX).toBeLessThan(150);
+    expect(shore.fallenTrees.length).toBeGreaterThanOrEqual(4);
+    expect(shore.platforms.filter((p) => p.kind === "fallenlog").length).toBe(shore.fallenTrees.length);
+    expect(shore.ants.every((a) => a.minX > shore.fatAntX + 40)).toBe(true);
   });
   it("rope bridges join every neighboring tree's decks", () => {
     const { world } = generateWorld(1337);

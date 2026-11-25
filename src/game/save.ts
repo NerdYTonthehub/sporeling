@@ -29,6 +29,7 @@ export interface SaveData {
   sacrificedFish?: string[];
   doorTreeIdx?: number | undefined;
   worldSeed?: number | undefined;
+  sporeSpring?: boolean | undefined;
 }
 
 const num = (v: unknown, lo: number, hi: number, fallback: number) =>
@@ -79,5 +80,6 @@ export function parseSave(raw: string | null): SaveData | null {
     sacrificedFish,
     doorTreeIdx: typeof o.doorTreeIdx === "number" && Number.isFinite(o.doorTreeIdx) ? Math.max(0, Math.floor(o.doorTreeIdx)) : undefined,
     worldSeed: typeof o.worldSeed === "number" && Number.isFinite(o.worldSeed) ? Math.floor(o.worldSeed) >>> 0 : undefined,
+    sporeSpring: o.sporeSpring === true,
   };
 }

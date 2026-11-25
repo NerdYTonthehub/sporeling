@@ -65,7 +65,7 @@ export function GameScreen() {
     setVolume(settings.volume);
     setMusicMuted(!settings.music);
     setMusicVolume(settings.volume);
-    gameRef.current?.setLabels({ act: primaryLabel(settings.keys, "act"), jump: primaryLabel(settings.keys, "jump"), down: primaryLabel(settings.keys, "down"), attack: primaryLabel(settings.keys, "attack") });
+    gameRef.current?.setLabels({ act: primaryLabel(settings.keys, "act"), jump: primaryLabel(settings.keys, "jump"), down: primaryLabel(settings.keys, "down"), attack: primaryLabel(settings.keys, "attack"), dash: primaryLabel(settings.keys, "dash") });
     if (ready) { try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch { /* Settings still work for this session. */ } }
   }, [settings, ready]);
 
@@ -300,6 +300,11 @@ export function GameScreen() {
                     ↑↑
                   </span>
                 )}
+                {hud.sporeSpring && (
+                  <span title="Spore Spring dash unlocked" aria-label="Spore Spring dash unlocked" className="text-lg leading-none text-accent">
+                    »
+                  </span>
+                )}
                 <GameButton
                   variant="plain"
                   aria-label={`Open fish bag (${bagCount})`}
@@ -497,6 +502,7 @@ export function GameScreen() {
                   ▤
                 </GameButton>
                 {hud?.scene === "room" && <><GameButton aria-label="Walk up" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("up")}>↑</GameButton><GameButton aria-label="Walk down" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("down")}>↓</GameButton></>}
+                {hud?.scene !== "room" && hud?.sporeSpring && <GameButton aria-label="Dash" className="pixel-btn h-10 w-10 touch-none text-base" {...hold("dash")}>»</GameButton>}
                 {hud?.scene !== "room" && <GameButton aria-label="Attack" className="pixel-btn h-10 w-10 touch-none text-lg" {...hold("attack")}>✦</GameButton>}
                 <GameButton aria-label="Eat or talk" className="pixel-btn h-10 w-10 sm:h-14 sm:w-14 touch-none text-xs" {...hold("act")}>
                   E

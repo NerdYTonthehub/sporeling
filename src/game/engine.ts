@@ -6,7 +6,10 @@ import {
   drawAppleTree,
   drawBeetle,
   drawBeetleKing,
+  drawBigAnt,
   drawBoat,
+  drawFallenTreeBack,
+  drawFallenTreeFront,
   drawFish,
   drawFlyer,
   drawHouse,
@@ -115,7 +118,7 @@ const ANT_DAMAGE = 10;
 const SOLDIER_ANT_DAMAGE = 15;
 const LAKE_FISHING_SPOT: Puddle = { x: LAKE_EDGE - 55, half: 55 };
 
-export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
+export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack" | "dash";
 export type Scene = "forest" | "dungeon" | "room" | "heaven" | "antshore";
 
 interface Level {
@@ -157,6 +160,7 @@ export interface HudState {
   coinPop: { amount: number; id: number } | null;
   scene: Scene;
   doubleJump: boolean;
+  sporeSpring: boolean;
   godDefeated: boolean;
   sitting: { from: string; destinations: { name: string; treetop: boolean; discovered: boolean }[] } | null;
   boss: { name: string; hp: number; max: number } | null;
@@ -215,7 +219,7 @@ export class Game {
   private returnPos = { x: 0, y: 0 };
   private p!: Player;
   private vitals!: Vitals;
-  private keys: Record<Key, boolean> = { left: false, right: false, up: false, down: false, jump: false, act: false, attack: false };
+  private keys: Record<Key, boolean> = { left: false, right: false, up: false, down: false, jump: false, act: false, attack: false, dash: false };
   private pressed = new Set<Key>();
   private camX = 0;
   private camY = 0;
@@ -247,6 +251,10 @@ export class Game {
   private coinPop: { amount: number; id: number; t: number } | null = null;
   private coinPopId = 0;
   private hasDoubleJump = false;
+  private hasSporeSpring = false;
+  private dashT = 0;
+  private dashCd = 0;
+  private dashDir = 1;
   private airJumps = 0;
   private attackT = 0;
   private attackDur = ATTACK_TIME;
@@ -266,7 +274,7 @@ export class Game {
   private sacrificedFish: string[] = [];
   private releasingKind: "coin" | "heaven" = "coin";
   private worldSeed = 1337;
-  private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
+  private labels = { act: "E", jump: "Space", down: "S", attack: "F", dash: "Shift" };
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -329,6 +337,10 @@ export class Game {
     this.coins = 0;
     this.coinPop = null;
     this.hasDoubleJump = false;
+    this.hasSporeSpring = false;
+    this.dashT = 0;
+    this.dashCd = 0;
+    this.dashDir = 1;
     this.airJumps = 0;
     this.attackT = 0;
     this.attackCd = 0;
@@ -418,7 +430,7 @@ export class Game {
   }
 
   /** Key names shown in on-screen prompts (follows the player's key bindings). */
-  setLabels(l: { act: string; jump: string; down: string; attack: string }) {
+  setLabels(l: { act: string; jump: string; down: string; attack: string; dash: string }) {
     this.labels = l;
   }
 
@@ -442,6 +454,7 @@ export class Game {
       applesEaten: this.applesEaten,
       time: Math.round(this.time),
       doubleJump: this.hasDoubleJump,
+      sporeSpring: this.hasSporeSpring,
       dungeonCleared: !!this.dungeon?.relicTaken,
       discovered: this.world.villages.filter((v) => v.discovered).map((v) => v.name),
       godDefeated: this.godDefeated,
@@ -463,6 +476,7 @@ export class Game {
     this.applesEaten = s.applesEaten;
     this.time = s.time;
     this.hasDoubleJump = s.doubleJump;
+    this.hasSporeSpring = s.sporeSpring === true;
     this.godDefeated = s.godDefeated === true;
     this.holyTries = s.holyTries ?? 0;
     this.sacrificedFish = [...(s.sacrificedFish ?? [])];
@@ -610,20 +624,61 @@ export class Game {
     const friction = FRICTION * speedMul;
 
     if (active) {
-      const dir = locked ? 0 : (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
-      const over = Math.abs(p.vx) > maxSpeed;
-      if (dir) {
-        p.vx += dir * accel * dt;
-        p.facing = dir;
-      } else {
-        const fr = friction * dt;
-        p.vx = Math.abs(p.vx) <= fr ? 0 : p.vx - Math.sign(p.vx) * fr;
+      this.dashT = Math.max(0, this.dashT - dt);
+      this.dashCd = Math.max(0, this.dashCd - dt);
+      if (!locked && this.hasSporeSpring && this.pressed.has("dash") && this.dashCd <= 0) {
+        const ddir = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0) || p.facing;
+        this.dashDir = ddir;
+        p.facing = ddir;
+        this.dashT = 0.16;
+        this.dashCd = 0.55;
+        p.vy = Math.min(p.vy, 0);
+        sfx.djump();
+        for (let i = 0; i < 8; i++) {
+          this.spawn({
+            x: p.x - ddir * 3,
+            y: p.y - 3 - Math.random() * 10,
+            vx: -ddir * (25 + Math.random() * 45),
+            vy: (Math.random() - 0.5) * 35,
+            life: 0.32,
+            color: i % 2 ? "#f5d76e" : "#b8e994",
+            size: 2,
+            grav: 0,
+            kind: "star",
+          });
+        }
       }
-      if (over) {
-        // knockback decays back to normal walking speed
-        p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - maxSpeed, 900 * dt);
+      if (!locked && this.dashT > 0) {
+        p.vx = this.dashDir * (this.scene === "heaven" ? 260 : 210);
+        if (Math.random() < dt * 45) {
+          this.spawn({
+            x: p.x - this.dashDir * 5,
+            y: p.y - 4 - Math.random() * 8,
+            vx: -this.dashDir * 24,
+            vy: (Math.random() - 0.5) * 14,
+            life: 0.22,
+            color: Math.random() < 0.5 ? "#f5d76e" : "#e8f78a",
+            size: 1,
+            grav: 0,
+            kind: "spark",
+          });
+        }
       } else {
-        p.vx = clamp(p.vx, -maxSpeed, maxSpeed);
+        const dir = locked ? 0 : (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
+        const over = Math.abs(p.vx) > maxSpeed;
+        if (dir) {
+          p.vx += dir * accel * dt;
+          p.facing = dir;
+        } else {
+          const fr = friction * dt;
+          p.vx = Math.abs(p.vx) <= fr ? 0 : p.vx - Math.sign(p.vx) * fr;
+        }
+        if (over) {
+          // knockback decays back to normal walking speed
+          p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx) - maxSpeed, 900 * dt);
+        } else {
+          p.vx = clamp(p.vx, -maxSpeed, maxSpeed);
+        }
       }
       if (!locked && jumpPressed) p.jumpBuf = 0.12;
       if (!locked && this.pressed.has("down") && p.plat) {
@@ -653,6 +708,7 @@ export class Game {
       if (!this.keys.jump && !this.keys.up && p.vy < -90) p.vy = -90;
       if (!locked && this.pressed.has("attack") && this.attackCd <= 0) this.startAttack();
     } else {
+      this.dashT = 0;
       p.vx *= 0.9;
     }
 
@@ -665,13 +721,15 @@ export class Game {
     this.attackCd -= dt;
     if (p.blinkT < -0.12) p.blinkT = 2 + Math.random() * 3;
 
-    p.vy = Math.min(400, p.vy + GRAVITY * dt);
+    p.vy = Math.min(400, p.vy + GRAVITY * (this.dashT > 0 ? 0.2 : 1) * dt);
     const prevY = p.y;
     const nx = clamp(p.x + p.vx * dt, this.minX(), this.maxX());
     // walls: a floor step more than 6px above your feet, or a ceiling lower than your head, blocks you
     const blocked = this.groundAt(nx) < p.y - 6 || this.ceilAt(nx) > p.y - 21;
-    if (blocked) p.vx = 0;
-    else p.x = nx;
+    if (blocked) {
+      p.vx = 0;
+      this.dashT = 0;
+    } else p.x = nx;
     if (this.scene === "forest" && p.x <= this.minX() + 0.5 && this.keys.left && this.lakeHintT <= 0 && this.running) {
       this.lakeHintT = 6;
       this.showToast("The Great Lake is far too deep to cross.");
@@ -1516,12 +1574,56 @@ export class Game {
     const A = this.labels.act;
     if (this.scene === "antshore" && this.antShore) {
       const atReturnBoat = p.onGround && p.plat?.kind === "pier" && p.x >= this.antShore.lakeEdge + 24;
+      const atFatAnt = p.onGround && !p.plat && Math.abs(p.x - this.antShore.fatAntX) < 26;
       if (this.talking) this.prompt = `${A} · next`;
       else if (atReturnBoat) this.prompt = `${A} · sail back to the forest`;
+      else if (atFatAnt) this.prompt = `${A} · talk to Plump Ant`;
       else this.prompt = null;
       if (this.pressed.has("act")) {
         if (this.talking) this.advanceTalk();
         else if (atReturnBoat) this.exitAntShore();
+        else if (atFatAnt) {
+          sfx.talk();
+          if (!this.hasSporeSpring) {
+            this.hasSporeSpring = true;
+            sfx.discover();
+            this.banner = { title: "Spore Spring!", sub: `Press ${this.labels.dash} to dash`, t: 3.8 };
+            for (let i = 0; i < 18; i++) {
+              const ang = (i / 18) * Math.PI * 2;
+              this.spawn({
+                x: p.x,
+                y: p.y - 10,
+                vx: Math.cos(ang) * 42,
+                vy: Math.sin(ang) * 34 - 12,
+                life: 0.65,
+                color: i % 2 ? "#f5d76e" : "#b8e994",
+                size: 2,
+                grav: 0,
+                kind: "star",
+              });
+            }
+            this.talking = {
+              npc: null,
+              name: "Bramm the Plump",
+              lines: [
+                "Oho! A little mushroom traveler crossed the lake alive!",
+                "Take my secret gift: the Spore Spring!",
+                `Press ${this.labels.dash} to burst forward in a flash — even over fallen logs and ant swarms.`,
+              ],
+              idx: 0,
+            };
+          } else {
+            this.talking = {
+              npc: null,
+              name: "Bramm the Plump",
+              lines: [
+                `Tap ${this.labels.dash} whenever you want to spring forward with Spore Spring!`,
+                "My little colony is rather grumpy today, so watch your cap out there.",
+              ],
+              idx: 0,
+            };
+          }
+        }
         this.emitHud();
       }
       return;
@@ -2330,6 +2432,7 @@ export class Game {
       coinPop: this.coinPop ? { amount: this.coinPop.amount, id: this.coinPop.id } : null,
       scene: this.scene,
       doubleJump: this.hasDoubleJump,
+      sporeSpring: this.hasSporeSpring,
       godDefeated: this.godDefeated,
       sitting:
         this.mode === "sitting" && this.sittingVillage
@@ -2636,27 +2739,70 @@ export class Game {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Distant parched ridge + withered dead tree silhouettes
-    for (const [factor, spacing, col, groundCol, horizon] of [
-      [0.2, 90, "#5a4632", "#745c42", 26],
-      [0.45, 160, "#413122", "#523e2a", 12],
+    // Distant parched ridge + GIANT mega anthills + withered & fallen background trees
+    for (const [factor, spacing, col, groundCol, horizon, hillScale] of [
+      [0.18, 120, "#5a4632", "#745c42", 28, 1.35],
+      [0.42, 170, "#413122", "#523e2a", 12, 0.85],
     ] as const) {
       const cam = cx * factor;
       const baseY = Math.round(GROUND_BASE - horizon - cy * factor);
-      const i0 = Math.floor(cam / spacing) - 1;
-      const i1 = Math.ceil((cam + W) / spacing) + 1;
+      const ridgeY = (wx: number) => baseY + Math.round(Math.sin(wx / 70 + horizon) * 4);
+      const i0 = Math.floor(cam / spacing) - 2;
+      const i1 = Math.ceil((cam + W) / spacing) + 2;
+
+      // Towering giant anthill silhouettes behind each ridge
+      const hillStep = factor < 0.3 ? 310 : 250;
+      const hi0 = Math.floor(cam / hillStep) - 1;
+      const hi1 = Math.ceil((cam + W) / hillStep) + 1;
+      for (let hi = hi0; hi <= hi1; hi++) {
+        if (hash1(hi, factor * 200 + 3) < 0.2) continue;
+        const hw = Math.round((115 + hash1(hi, 17) * 55) * hillScale);
+        const hh = Math.round((78 + hash1(hi, 23) * 34) * hillScale);
+        const hwx = hi * hillStep + hash1(hi, 31) * 90;
+        const hx = Math.round(hwx - cam);
+        const hgy = ridgeY(hwx) + 6;
+        const shade = factor < 0.3 ? "#5e4934" : "#493727";
+        const lit = factor < 0.3 ? "#745b41" : "#5e4833";
+        const hole = factor < 0.3 ? "#3e2f20" : "#291d13";
+        const rows = Math.max(12, Math.floor(hh / 3));
+        for (let r = 0; r < rows; r++) {
+          const p = r / (rows - 1);
+          const rw = Math.max(8, Math.round(hw * Math.pow(1 - p * 0.86, 0.72)));
+          const y0 = Math.round(hgy - (r + 1) * (hh / rows));
+          const rowH = Math.ceil(hh / rows) + 1;
+          rect(ctx, shade, hx - Math.round(rw / 2), y0, rw, rowH);
+          rect(ctx, lit, hx + Math.round(rw * 0.08), y0, Math.max(2, Math.round(rw * 0.36)), rowH);
+        }
+        // Giant crater top + cavern mouths
+        const rimW = Math.max(10, Math.round(hw * 0.16));
+        rect(ctx, hole, hx - Math.round(rimW / 2), hgy - hh, rimW, 4);
+        rect(ctx, hole, hx - Math.round(hw * 0.18), hgy - Math.round(hh * 0.36), Math.max(6, Math.round(hw * 0.1)), Math.round(hh * 0.22));
+        rect(ctx, hole, hx + Math.round(hw * 0.1), hgy - Math.round(hh * 0.22), Math.max(5, Math.round(hw * 0.09)), Math.round(hh * 0.18));
+      }
+
+      // Withered standing trees & background fallen trunks along the horizon
       for (let i = i0; i <= i1; i++) {
-        if (hash1(i, factor * 100) < 0.35) continue;
-        const tx = Math.round(i * spacing + hash1(i, 7) * 40 - cam);
-        const h = 36 + Math.floor(hash1(i, 9) * 34);
-        rect(ctx, col, tx, baseY - h, 3, h);
-        rect(ctx, col, tx - 5, baseY - h + 6, 5, 2);
-        rect(ctx, col, tx + 3, baseY - h + 11, 6, 2);
+        if (hash1(i, factor * 100) < 0.3) continue;
+        const wx = i * spacing + hash1(i, 7) * 40;
+        const tx = Math.round(wx - cam);
+        const gy = ridgeY(wx);
+        if (hash1(i, 41) < 0.45) {
+          const lw = Math.round((36 + hash1(i, 43) * 28) * (factor < 0.3 ? 0.75 : 1));
+          const lh = factor < 0.3 ? 4 : 6;
+          const dir = hash1(i, 47) < 0.5 ? 1 : -1;
+          rect(ctx, col, tx - Math.round(lw / 2), gy - lh, lw, lh + 2);
+          rect(ctx, col, tx - dir * Math.round(lw * 0.48), gy - lh - 3, 5, lh + 4);
+          rect(ctx, groundCol, tx - dir * Math.round(lw * 0.22), gy - lh - 2, 7, 2);
+        } else {
+          const h = 36 + Math.floor(hash1(i, 9) * 34);
+          rect(ctx, col, tx, gy - h, 3, h);
+          rect(ctx, col, tx - 5, gy - h + 6, 5, 2);
+          rect(ctx, col, tx + 3, gy - h + 11, 6, 2);
+        }
       }
       ctx.fillStyle = groundCol;
       for (let x = 0; x < W; x += 4) {
-        const wx = x + cam;
-        const y = baseY + Math.round(Math.sin(wx / 70 + horizon) * 4);
+        const y = ridgeY(x + cam);
         ctx.fillRect(x, y, 4, H - y);
       }
     }
@@ -2664,7 +2810,7 @@ export class Game {
     // Anthills behind ground grass rim
     for (const ah of shore.anthills) {
       const sx = ah.x - cx;
-      if (sx < -40 || sx > W + 40) continue;
+      if (sx < -55 || sx > W + 55) continue;
       drawAnthill(ctx, Math.round(sx), Math.round(this.groundAt(ah.x) - cy), ah.w, ah.h);
     }
 
@@ -2702,6 +2848,13 @@ export class Game {
       if (hash1(wx, 15) < 0.07) rect(ctx, "#21150c", x, y + 6 + (wx % 12), 2, 1);
     }
 
+    // Fallen tree tunnel interiors (player & ants pass in front of these dark hollows)
+    for (const ft of shore.fallenTrees) {
+      const sx = Math.round(ft.x - cx);
+      if (sx < -60 || sx > W + 60) continue;
+      drawFallenTreeBack(ctx, sx, Math.round(this.groundAt(ft.x) - cy), ft.w, ft.h, ft.flip);
+    }
+
     // Dead grass tufts, dry bushes, twigs & pebbles
     for (const d of shore.decor) {
       const sx = Math.round(d.x - cx);
@@ -2728,6 +2881,17 @@ export class Game {
       }
     }
 
+    // Far-left friendly Plump Ant (grants Spore Spring dash)
+    const p = this.p;
+    const fatSx = Math.round(shore.fatAntX - cx);
+    if (fatSx > -40 && fatSx < W + 40) {
+      const fatGy = Math.round(this.groundAt(shore.fatAntX) - cy);
+      drawBigAnt(ctx, fatSx, fatGy, p.x >= shore.fatAntX ? 1 : -1, this.time, Math.sin(this.time * 1.4) > 0.96);
+      if (Math.abs(p.x - shore.fatAntX) < 36 && !this.talking) {
+        this.drawBubble(fatSx, fatGy - 28);
+      }
+    }
+
     // Swarming worker & soldier ants
     for (const a of shore.ants) {
       if (!a.alive) continue;
@@ -2738,7 +2902,6 @@ export class Game {
     }
 
     // Player & combat
-    const p = this.p;
     const blinkHurt = p.invuln > 0 && Math.floor(this.time * 18) % 2 === 0;
     if (!blinkHurt) {
       drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), {
@@ -2754,6 +2917,14 @@ export class Game {
       });
     }
     this.drawAttack(cx, cy);
+
+    // Fallen tree front roof & bark arches (player visibly walks through at ground level or over the top)
+    for (const ft of shore.fallenTrees) {
+      const sx = Math.round(ft.x - cx);
+      if (sx < -60 || sx > W + 60) continue;
+      drawFallenTreeFront(ctx, sx, Math.round(this.groundAt(ft.x) - cy), ft.w, ft.h);
+    }
+
     this.drawParticles(cx, cy, false);
     this.drawParticles(cx, cy, true);
 
