@@ -705,7 +705,7 @@ export class Game {
       p.vx = 0;
       p.vy = 0;
       p.onGround = true;
-      p.plat = null;
+      p.plat = this.villageDeck(this.sittingVillage);
       if (active && !this.fade && (this.keys.left || this.keys.right || this.pressed.has("jump") || this.pressed.has("up") || this.pressed.has("down"))) {
         this.standUp();
       }
@@ -1548,7 +1548,7 @@ export class Game {
     this.nearPuddle = puddle;
 
     let logSpot: { v: Village; x: number } | null = null;
-    if (p.onGround && !p.plat) {
+    if (p.onGround && (!p.plat || p.plat.kind === "deck")) {
       for (const v of this.world.villages) {
         if (Math.abs(p.y - this.villageFloor(v)) > 4) continue;
         for (const lx of [v.fireX - 16, v.fireX + 16]) {
@@ -1620,15 +1620,22 @@ export class Game {
     }
   }
 
+  private villageDeck(v: Village): Platform | null {
+    if (v.floorY === undefined) return null;
+    const fy = v.floorY;
+    return this.world.platforms.find((pl) => pl.kind === "deck" && Math.abs(pl.y - fy) <= 1 && v.fireX >= pl.x && v.fireX <= pl.x + pl.w) ?? null;
+  }
+
   // ---------- campfire log sitting & village teleportation ----------
   private sitOnLog(v: Village, logX: number) {
     const p = this.p;
+    v.discovered = true;
     p.x = logX;
     p.y = this.villageFloor(v) - 3;
     p.vx = 0;
     p.vy = 0;
     p.facing = logX < v.fireX ? 1 : -1;
-    p.plat = null;
+    p.plat = this.villageDeck(v);
     p.onGround = true;
     this.mode = "sitting";
     this.sittingVillage = v;
@@ -1642,6 +1649,7 @@ export class Game {
     if (this.sittingVillage) {
       this.p.y = this.villageFloor(this.sittingVillage);
       this.p.vy = 0;
+      this.p.plat = this.villageDeck(this.sittingVillage);
       this.p.onGround = true;
     }
     this.mode = "walk";
@@ -1663,7 +1671,7 @@ export class Game {
       p.vx = 0;
       p.vy = 0;
       p.facing = 1;
-      p.plat = null;
+      p.plat = this.villageDeck(target);
       p.onGround = true;
       target.discovered = true;
       this.snapCamera();

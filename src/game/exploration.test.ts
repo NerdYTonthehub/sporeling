@@ -5,11 +5,19 @@ import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, moveInRoom } from "./inte
 import { sectionCleared } from "./combat";
 
 describe("forest exploration", () => {
-  it("has exactly two ground-level and two treetop villages", () => {
+  it("has exactly two ground-level and two treetop villages, each with a campfire for teleporting", () => {
     const { world } = generateWorld(1337);
     expect(world.villages.filter((v) => v.floorY === undefined)).toHaveLength(2);
     expect(world.villages.filter((v) => v.floorY !== undefined)).toHaveLength(2);
     expect(world.villages).toHaveLength(TOTAL_VILLAGES);
+    for (const v of world.villages) {
+      expect(v.fireX).toBeGreaterThanOrEqual(v.x - v.half + 16);
+      expect(v.fireX).toBeLessThanOrEqual(v.x + v.half - 16);
+      if (v.floorY !== undefined) {
+        const deck = world.platforms.find((pl) => pl.kind === "deck" && Math.abs(pl.y - v.floorY!) <= 1 && v.fireX - 16 >= pl.x && v.fireX + 16 <= pl.x + pl.w);
+        expect(deck).toBeDefined();
+      }
+    }
   });
   it("places the dungeon entrance randomly on any ground-level tree", () => {
     const { world: wDefault } = generateWorld(1337);
