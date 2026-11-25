@@ -1,6 +1,22 @@
 // Game loop, physics, interactions and rendering for the mushroom sidescroller.
 import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
-import { FISH, MAX_HOLY_TRIES, addFish, fishById, releaseReward, removeFish, resolveBite, rollFish, rollWait, type FishSpecies, type Inventory } from "./fishing";
+import {
+  FISH,
+  GODLY_PITY_LIMIT,
+  MAX_HOLY_TRIES,
+  addFish,
+  advanceFishingStreak,
+  fishById,
+  isWithinPoolRadius,
+  releaseReward,
+  removeFish,
+  resolveBite,
+  rollFish,
+  rollWait,
+  type FishSpecies,
+  type FishingStreak,
+  type Inventory,
+} from "./fishing";
 import { sfx } from "./sfx";
 import { eatApple, eatGlowcap, isDead, nap, takeDamage, tickVitals, type Vitals } from "./vitals";
 import { ATTACK_COOLDOWN, ATTACK_TIME, BEETLE_DAMAGE, BOSS_DAMAGE, FLYER_DAMAGE, attackHits, damageFlyer, jumpsAllowed, sectionCleared, stepFlyer, type Flyer } from "./combat";
@@ -218,6 +234,7 @@ export class Game {
   private holyTries = 0;
   private sacrificedFish: string[] = [];
   private releasingKind: "coin" | "heaven" = "coin";
+  private fishingStreak: FishingStreak | null = null;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -286,6 +303,7 @@ export class Game {
     this.holyTries = 0;
     this.sacrificedFish = [];
     this.releasingKind = "coin";
+    this.fishingStreak = null;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
     this.emitHud();
@@ -725,6 +743,9 @@ export class Game {
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
     if (this.scene === "heaven") this.updateHeaven(dt, active && this.mode !== "releasing" && !this.fade);
+    if (this.fishingStreak && (this.scene !== "forest" || !isWithinPoolRadius(this.fishingStreak, p.x, p.y))) {
+      this.fishingStreak = null;
+    }
     if (active && this.attackT > 0) this.resolveAttack();
     if (active && this.mode === "fishing") this.updateFishing(dt);
     if (active && this.mode === "releasing") this.updateRelease(dt);
@@ -752,6 +773,7 @@ export class Game {
   private enterHouse(v: Village, h: House) {
     sfx.door();
     this.transition(() => {
+      this.fishingStreak = null;
       this.returnPos = { x: this.p.x, y: this.p.y };
       this.room = createRoom(h, v.name, Math.round(h.x * 13 + v.x * 7));
       this.scene = "room";
@@ -1317,7 +1339,10 @@ export class Game {
     else if (house) this.prompt = `${A} · go inside`;
     else if (atElder) this.prompt = this.hasDoubleJump ? `${A} · enter the Elder Tree (cleared)` : `${A} · enter the Elder Tree`;
     else if (tree) this.prompt = `${A} · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
-    else if (puddle) this.prompt = `${A} · fish in the puddle`;
+    else if (puddle) {
+      const streak = this.hasDoubleJump && this.fishingStreak?.puddleX === puddle.x ? this.fishingStreak.catches : 0;
+      this.prompt = streak > 0 ? `${A} · fish in the puddle (${streak}/${GODLY_PITY_LIMIT})` : `${A} · fish in the puddle`;
+    }
     else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
     else this.prompt = null;
 
@@ -1414,7 +1439,9 @@ export class Game {
     }
     this.prompt = `${this.labels.jump}!`;
     if (res === "caught") {
-      const fish = rollFish(Math.random(), this.hasDoubleJump);
+      const catchesAtPool = this.fishingStreak && this.fishingStreak.puddleX === f.puddle.x ? this.fishingStreak.catches : 0;
+      const fish = rollFish(Math.random(), this.hasDoubleJump, catchesAtPool);
+      this.fishingStreak = advanceFishingStreak(this.fishingStreak, { x: f.puddle.x, half: f.puddle.half, y: wy }, fish.id, this.hasDoubleJump);
       this.inventory = addFish(this.inventory, fish.id);
       this.fishCaught++;
       sfx.caught();
@@ -1422,7 +1449,13 @@ export class Game {
         this.spawn({ x: f.bobX, y: wy, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
       }
       this.catchAnim = { fish, t: 0, x0: f.bobX, y0: wy };
-      this.endFishing(fish.id === "godly" ? "You caught a Godly Goldfish!" : `You caught a ${fish.name}!`);
+      const msg =
+        fish.id === "godly"
+          ? "You caught a Godly Goldfish!"
+          : this.fishingStreak && this.fishingStreak.catches > 0
+            ? `You caught a ${fish.name}! (${this.fishingStreak.catches}/${GODLY_PITY_LIMIT})`
+            : `You caught a ${fish.name}!`;
+      this.endFishing(msg);
     } else if (res === "missed") {
       sfx.splash();
       this.endFishing("It got away…");
