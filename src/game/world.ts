@@ -193,7 +193,7 @@ const VILLAGE_DEFS: { name: string; x: number; npcs: [string, string, boolean, n
         "Did you know some mushrooms glow at night? I'm working on it.",
       ]],
       ["Morsel", "#c9b38a", true, 0.85, [
-        "The Elder Tree at the very end of the forest is hollow. Old stone halls inside, crawling with beetles!",
+        "One of the giant trees in the forest is hollow with a glowing door at its base. Old stone halls inside, crawling with beetles!",
         "They say whoever clears it out gets the Winged Spore. Then you could jump twice!",
       ]],
     ],
@@ -235,13 +235,12 @@ export const TOTAL_VILLAGES = VILLAGE_DEFS.length + TREE_VILLAGE_DEFS.length;
 const SHELLS = ["#c98a4a", "#b86a8a", "#d9b46a", "#8a6a9a", "#c76a4a"];
 const CAPS = ["#d9443a", "#c8302a", "#e8a33a", "#8a5a3a", "#efe6d2", "#3e7fb8", "#b8572e", "#6b4a35"];
 
-export function generateWorld(seed = 1337): { world: World; groundY: (x: number) => number } {
+export function generateWorld(seed = 1337, doorIndex?: number): { world: World; groundY: (x: number) => number } {
   const rnd = mulberry32(seed);
   const rr = (a: number, b: number) => a + rnd() * (b - a);
 
   const villageSpans = VILLAGE_DEFS.map((v) => ({ x: v.x, half: 150 }));
   const nearLake = (x: number, pad = 0) => x < LAKE_EDGE + 120 + pad;
-  // The Elder Tree (the dungeon) always stands furthest to the right.
   const ELDER_W = 170;
   const ELDER_X = WORLD_W - 480;
   const inElder = (x: number, pad = 0) => x > ELDER_X - 60 - pad && x < ELDER_X + ELDER_W + 60 + pad;
@@ -302,17 +301,24 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
     }
     x += w + rr(260, 520);
   }
-  const elder: GiantTree = { x: ELDER_X, w: ELDER_W, seed: 4242, deckY: 0, deckX0: 0, deckX1: 0, elder: true };
-  trees.push(elder);
+  trees.push({ x: ELDER_X, w: ELDER_W, seed: 4242, deckY: 0, deckX0: 0, deckX1: 0 });
 
   // Which two trees carry a village at the top
   const villageTrees = new Map<GiantTree, (typeof TREE_VILLAGE_DEFS)[number]>();
   for (const def of TREE_VILLAGE_DEFS) {
     const t = trees
-      .filter((tr) => !tr.elder && tr !== trees[0] && !villageTrees.has(tr))
+      .filter((tr) => tr !== trees[0] && !villageTrees.has(tr))
       .reduce((a, b) => (Math.abs(a.x - def.near) < Math.abs(b.x - def.near) ? a : b));
     villageTrees.set(t, def);
   }
+
+  // Randomize which ground-level tree houses the glowing dungeon door (and Winged Spore).
+  const chosenIdx =
+    doorIndex !== undefined && Number.isFinite(doorIndex)
+      ? Math.max(0, Math.min(trees.length - 1, Math.floor(doorIndex)))
+      : Math.floor(Math.random() * trees.length);
+  const elder = trees[chosenIdx]!;
+  elder.elder = true;
 
   // Climbing route: two easy shelves, then shelves too far apart for a single jump (needs the double jump).
   for (const t of trees) {
@@ -460,7 +466,7 @@ export function generateWorld(seed = 1337): { world: World; groundY: (x: number)
   const beetles: Beetle[] = [];
   x = LAKE_EDGE + 1100;
   while (x < ELDER_X - 120) {
-    if (!inVillage(x, 120) && !nearPuddle(x, 190)) {
+    if (!inVillage(x, 120) && !nearPuddle(x, 190) && Math.abs(x - (elder.x + elder.w / 2)) > elder.w / 2 + 40) {
       const range = rr(50, 110);
       beetles.push({
         x,

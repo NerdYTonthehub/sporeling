@@ -27,6 +27,7 @@ export interface SaveData {
   godDefeated?: boolean;
   holyTries?: number;
   sacrificedFish?: string[];
+  doorTreeIdx?: number | undefined;
 }
 
 const num = (v: unknown, lo: number, hi: number, fallback: number) =>
@@ -75,5 +76,6 @@ export function parseSave(raw: string | null): SaveData | null {
     godDefeated: o.godDefeated === true,
     holyTries: Math.floor(num(o.holyTries, 0, 3, 0)),
     sacrificedFish,
+    doorTreeIdx: typeof o.doorTreeIdx === "number" && Number.isFinite(o.doorTreeIdx) ? Math.max(0, Math.floor(o.doorTreeIdx)) : undefined,
   };
 }

@@ -10,7 +10,7 @@ export const HEAVEN_FLOOR_Y = 178;
 /** Safe standing margin at both screen edges where the light beam stops short. */
 export const BEAM_EDGE_SAFE = 26;
 export const BEAM_HALF_W = 9;
-export const GOD_HP = 10;
+export const GOD_HP = 8;
 export const GOD_BOMB_DAMAGE = 16;
 export const GOD_SMASH_DAMAGE = 22;
 export const GOD_BEAM_DAMAGE = 18;
@@ -109,7 +109,7 @@ export function createHeaven(arenaW: number, sacrificedIds: string[]): HeavenSta
       maxHp: GOD_HP,
       phase: "arrive",
       sub: "windup",
-      timer: 1.5,
+      timer: 0.9,
       hitT: 0,
       attackIdx: 0,
       bombsLeft: 0,
@@ -175,8 +175,9 @@ export function applyHolyTryOutcome(
 export function drawHeavenBack(ctx: Ctx, h: HeavenState, W: number, H: number) {
   // Radiant heavenly sky gradient
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, "#5ea8dc");
-  grad.addColorStop(0.55, "#bce8ff");
+  grad.addColorStop(0, "#4f9ad4");
+  grad.addColorStop(0.52, "#a8ddff");
+  grad.addColorStop(0.84, "#eef8ff");
   grad.addColorStop(1, "#fff6d6");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
@@ -185,26 +186,33 @@ export function drawHeavenBack(ctx: Ctx, h: HeavenState, W: number, H: number) {
   const sx = Math.round(W / 2);
   const sy = 36;
   ctx.globalCompositeOperation = "lighter";
-  const sun = ctx.createRadialGradient(sx, sy, 2, sx, sy, 95);
-  sun.addColorStop(0, "rgba(255,248,200,0.65)");
-  sun.addColorStop(0.5, "rgba(255,225,130,0.22)");
+  const sun = ctx.createRadialGradient(sx, sy, 2, sx, sy, 105);
+  sun.addColorStop(0, "rgba(255,248,200,0.7)");
+  sun.addColorStop(0.5, "rgba(255,225,130,0.24)");
   sun.addColorStop(1, "rgba(255,225,130,0)");
   ctx.fillStyle = sun;
-  ctx.fillRect(sx - 95, 0, 190, 140);
+  ctx.fillRect(sx - 105, 0, 210, 145);
   ctx.globalCompositeOperation = "source-over";
 
-  // Distant floating golden temple pillars (behind clouds)
+  // Distant floating golden temple pillars rising from lower clouds
   for (const px of [44, Math.round(W * 0.28), Math.round(W * 0.72), W - 44]) {
-    rect(ctx, "#d8c89c", px - 5, 42, 10, h.floorY - 42);
-    rect(ctx, "#f5ead0", px - 4, 42, 4, h.floorY - 42);
+    rect(ctx, "#d8c89c", px - 5, 42, 10, h.floorY - 46);
+    rect(ctx, "#f5ead0", px - 4, 42, 4, h.floorY - 46);
     rect(ctx, "#c6ab70", px - 7, 38, 14, 5);
     rect(ctx, "#ffe896", px - 6, 39, 12, 2);
   }
 
+  // Soft background horizon cloud ridge behind the fighting cloud bank
+  ctx.fillStyle = "#d9efff";
+  for (let x = -8; x <= W + 16; x += 20) {
+    const bob = Math.round(Math.sin(h.t * 0.9 + x * 0.08) * 1.5);
+    fillCircle(ctx, x, h.floorY - 6 + ((x * 5) % 4) + bob, 14);
+  }
+
   // Drifting heavenly clouds
-  for (let i = 0; i < 6; i++) {
-    const cx = Math.round(((i * 95 + h.t * (5 + (i % 3) * 2)) % (W + 80)) - 40);
-    const cy = 28 + (i % 3) * 32;
+  for (let i = 0; i < 8; i++) {
+    const cx = Math.round(((i * 78 + h.t * (7 + (i % 3) * 3)) % (W + 84)) - 42);
+    const cy = 24 + (i % 4) * 26;
     ctx.fillStyle = "#ffffff";
     fillCircle(ctx, cx, cy, 10);
     fillCircle(ctx, cx - 9, cy + 3, 7);
@@ -228,32 +236,58 @@ export function drawHeavenBack(ctx: Ctx, h: HeavenState, W: number, H: number) {
 
 export function drawHeavenFloor(ctx: Ctx, h: HeavenState, W: number, H: number) {
   const y = h.floorY;
-  // Cloud bank beneath the marble floor
-  ctx.fillStyle = "#e8f4ff";
-  for (let x = 0; x <= W; x += 18) {
-    fillCircle(ctx, x, y + 18 + ((x * 7) % 5), 14);
-  }
-  ctx.fillStyle = "#ffffff";
-  for (let x = 8; x <= W; x += 22) {
-    fillCircle(ctx, x, y + 13, 11);
-  }
-  rect(ctx, "#d2e6f7", 0, y + 20, W, H - (y + 20));
+  // Base cloud sea filling the bottom of the screen
+  rect(ctx, "#c6e2f8", 0, y + 8, W, H - (y + 8));
+  rect(ctx, "#9fc4e6", 0, y + 26, W, H - (y + 26));
 
-  // Marble & gold arena floor
-  rect(ctx, "#1b140f", 0, y - 1, W, 1);
-  rect(ctx, "#fffaf0", 0, y, W, 3);
-  rect(ctx, "#eadfb8", 0, y + 3, W, 6);
-  rect(ctx, "#d4b464", 0, y + 9, W, 2);
-  rect(ctx, "#b88e3a", 0, y + 11, W, 2);
-  for (let x = 16; x < W; x += 24) {
-    rect(ctx, "#d8cfa8", x, y + 1, 1, 8);
+  // Upper bright sunlit cloud puffs forming the walkable cloud surface at y = h.floorY
+  for (let x = -4; x <= W + 8; x += 14) {
+    const wave = Math.round(Math.sin(h.t * 1.4 + x * 0.11) * 0.8);
+    ctx.fillStyle = "#fffef8";
+    fillCircle(ctx, x, y + 8 + ((x * 3) % 3) + wave, 11);
+  }
+  for (let x = 3; x <= W + 6; x += 11) {
+    ctx.fillStyle = "#ffffff";
+    fillCircle(ctx, x, y + 6 + ((x * 5) % 2), 8);
+  }
+  // Soft sunlit rim right where the player's feet stand on top of the clouds
+  for (let x = 0; x <= W; x += 9) {
+    ctx.fillStyle = "#ffffff";
+    fillCircle(ctx, x, y + 5, 6);
   }
 
-  // Subtle golden edge markers showing the safe edge pockets for the light beam
+  // Mid-cloud shaded billow bellies beneath the fluffy surface
+  ctx.fillStyle = "#dff1ff";
+  for (let x = -6; x <= W + 12; x += 18) {
+    fillCircle(ctx, x, y + 15 + ((x * 7) % 4), 12);
+  }
+  ctx.fillStyle = "#b9dbf5";
+  for (let x = 4; x <= W + 12; x += 22) {
+    fillCircle(ctx, x, y + 24 + ((x * 3) % 5), 14);
+  }
+  ctx.fillStyle = "#91b8dc";
+  for (let x = -4; x <= W + 14; x += 24) {
+    fillCircle(ctx, x, y + 34 + ((x * 11) % 4), 15);
+  }
+
+  // Subtle golden sparkle markers on the clouds showing the safe edge pockets for the light beam
   const { minX, maxX } = beamBounds(W);
   for (const edgeX of [minX - BEAM_HALF_W - 2, maxX + BEAM_HALF_W + 2]) {
-    rect(ctx, "#f2c84b", edgeX, y, 1, 3);
+    rect(ctx, "#ffe46b", edgeX, y - 1, 2, 2);
+    rect(ctx, "#fff6c4", edgeX, y + 2, 1, 2);
   }
+}
+
+export function drawHeavenFrontClouds(ctx: Ctx, h: HeavenState, W: number) {
+  const y = h.floorY;
+  // Soft foreground cloud wisps overlapping the very bottom of the feet so you stand in clouds
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = "#ffffff";
+  for (let x = 2; x <= W + 8; x += 16) {
+    const drift = Math.round(Math.sin(h.t * 1.8 + x * 0.13) * 1.2);
+    fillCircle(ctx, x + drift, y + 6 + ((x * 3) % 2), 5);
+  }
+  ctx.globalAlpha = 1;
 }
 
 export function drawHeavenEffects(ctx: Ctx, h: HeavenState) {
