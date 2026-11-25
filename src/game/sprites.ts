@@ -922,18 +922,20 @@ export function drawFishBomb(ctx: Ctx, x: number, y: number, vx: number, vy: num
 /** Red-and-white striped coastal lighthouse standing on the lake shore. (x, gy) = base center. */
 export function drawLighthouse(ctx: Ctx, x: number, gy: number, t: number, night: number) {
   // Stone foundation
-  rect(ctx, OUTLINE, x - 16, gy - 7, 32, 7);
-  rect(ctx, "#6b6559", x - 15, gy - 6, 30, 6);
-  rect(ctx, "#8d887c", x - 15, gy - 6, 30, 2);
+  rect(ctx, OUTLINE, x - 17, gy - 8, 34, 8);
+  rect(ctx, "#6b6559", x - 16, gy - 7, 32, 7);
+  rect(ctx, "#8d887c", x - 16, gy - 7, 32, 2);
 
-  // Tapered striped tower (7 bands alternating white & red)
+  // Tapered taller striped tower (8 bands alternating white & red)
   const bands: [number, number, number, string, string][] = [
-    [-15, 22, 8, "#f0eadc", "#cfc5b2"],
-    [-23, 20, 8, "#c8382c", "#96241b"],
-    [-31, 18, 8, "#f0eadc", "#cfc5b2"],
-    [-39, 16, 8, "#c8382c", "#96241b"],
-    [-47, 14, 8, "#f0eadc", "#cfc5b2"],
-    [-55, 14, 8, "#c8382c", "#96241b"],
+    [-16, 24, 8, "#f0eadc", "#cfc5b2"],
+    [-24, 22, 8, "#c8382c", "#96241b"],
+    [-32, 20, 8, "#f0eadc", "#cfc5b2"],
+    [-40, 20, 8, "#c8382c", "#96241b"],
+    [-48, 18, 8, "#f0eadc", "#cfc5b2"],
+    [-56, 16, 8, "#c8382c", "#96241b"],
+    [-64, 16, 8, "#f0eadc", "#cfc5b2"],
+    [-72, 14, 8, "#c8382c", "#96241b"],
   ];
   for (const [dy, w, h, col, sh] of bands) {
     const lx = x - Math.round(w / 2);
@@ -943,72 +945,99 @@ export function drawLighthouse(ctx: Ctx, x: number, gy: number, t: number, night
   }
 
   // Wooden door at ground base
-  rect(ctx, OUTLINE, x - 4, gy - 15, 8, 9);
-  rect(ctx, "#5a3c26", x - 3, gy - 14, 6, 8);
-  rect(ctx, "#8a6342", x - 2, gy - 13, 2, 6);
-  rect(ctx, "#f2c84b", x + 1, gy - 10, 1, 1);
+  rect(ctx, OUTLINE, x - 4, gy - 16, 8, 9);
+  rect(ctx, "#5a3c26", x - 3, gy - 15, 6, 8);
+  rect(ctx, "#8a6342", x - 2, gy - 14, 2, 6);
+  rect(ctx, "#f2c84b", x + 1, gy - 11, 1, 1);
 
-  // Small tower windows (lit warmly at dusk/night)
+  // Tower windows (lit warmly at dusk/night)
   const winCol = night > 0.1 ? "#ffd56a" : "#3a5060";
-  for (const wy of [-27, -43]) {
+  for (const wy of [-29, -45, -61]) {
     rect(ctx, OUTLINE, x - 2, gy + wy, 4, 5);
     rect(ctx, winCol, x - 1, gy + wy + 1, 2, 3);
   }
 
   // Balcony gallery & railing
-  rect(ctx, OUTLINE, x - 10, gy - 59, 20, 4);
-  rect(ctx, "#3a281c", x - 9, gy - 58, 18, 3);
-  rect(ctx, "#8d887c", x - 9, gy - 58, 18, 1);
-  for (let rx = -8; rx <= 8; rx += 4) rect(ctx, "#1b140f", x + rx, gy - 61, 1, 3);
+  rect(ctx, OUTLINE, x - 11, gy - 76, 22, 4);
+  rect(ctx, "#3a281c", x - 10, gy - 75, 20, 3);
+  rect(ctx, "#8d887c", x - 10, gy - 75, 20, 1);
+  for (let rx = -9; rx <= 9; rx += 4) rect(ctx, "#1b140f", x + rx, gy - 78, 1, 3);
 
   // Glass lantern room + rotating golden lamp
-  rect(ctx, OUTLINE, x - 6, gy - 69, 12, 10);
-  rect(ctx, "#a8e6f0", x - 5, gy - 68, 10, 8);
+  rect(ctx, OUTLINE, x - 6, gy - 87, 12, 11);
+  rect(ctx, "#a8e6f0", x - 5, gy - 86, 10, 9);
   const pulse = Math.sin(t * 2.2);
   const lampX = x + Math.round(pulse * 2);
-  rect(ctx, "#fff6b8", lampX - 2, gy - 66, 5, 4);
-  rect(ctx, "#ffffff", lampX - 1, gy - 65, 3, 2);
+  rect(ctx, "#fff6b8", lampX - 2, gy - 84, 5, 5);
+  rect(ctx, "#ffffff", lampX - 1, gy - 83, 3, 3);
 
-  // Red dome roof + spire
-  rect(ctx, OUTLINE, x - 7, gy - 73, 14, 4);
-  rect(ctx, "#c8382c", x - 6, gy - 72, 12, 3);
-  rect(ctx, "#96241b", x - 4, gy - 75, 8, 2);
-  rect(ctx, "#1b140f", x, gy - 78, 1, 4);
+  // Red dome roof + tall spire
+  rect(ctx, OUTLINE, x - 7, gy - 91, 14, 4);
+  rect(ctx, "#c8382c", x - 6, gy - 90, 12, 3);
+  rect(ctx, "#96241b", x - 4, gy - 93, 8, 2);
+  rect(ctx, "#1b140f", x, gy - 97, 1, 5);
 }
 
-/** Wooden ferry boat docked on the lake water. (x, wy) = waterline center. */
+/** Larger motorized boat docked on the lake water. (x, wy) = waterline center. */
 export function drawBoat(ctx: Ctx, x: number, wy: number, t: number, dir = -1) {
-  const bob = Math.round(Math.sin(t * 2.5));
+  const f = dir >= 0 ? 1 : -1;
+  const bob = Math.round(Math.sin(t * 2.4));
   const y = wy + bob;
 
-  // Hull
-  rect(ctx, OUTLINE, x - 14, y - 5, 28, 6);
-  rect(ctx, OUTLINE, x - 11, y + 1, 22, 2);
-  rect(ctx, "#5a3c26", x - 13, y - 4, 26, 4);
-  rect(ctx, "#8a6342", x - 12, y - 4, 24, 2);
-  rect(ctx, "#b38a54", x - 11, y - 4, 22, 1);
-  rect(ctx, "#3a281c", x - 10, y, 20, 2);
-  // Prow curl on bow side
-  const bowX = dir < 0 ? x - 15 : x + 13;
-  rect(ctx, OUTLINE, bowX, y - 7, 3, 3);
-  rect(ctx, "#8a6342", bowX + 1, y - 6, 1, 2);
+  // Main sleek hull (~42px wide with angled bow prow)
+  rect(ctx, OUTLINE, x - 20, y - 7, 40, 8);
+  rect(ctx, OUTLINE, x - 17, y + 1, 34, 3);
+  // Pointed bow extension
+  const prowX = f < 0 ? x - 24 : x + 19;
+  rect(ctx, OUTLINE, prowX, y - 8, 5, 4);
+  rect(ctx, OUTLINE, prowX + (f < 0 ? 2 : 0), y - 4, 3, 4);
 
-  // Small mast & furled cream sail + glowing bow lantern
-  rect(ctx, OUTLINE, x - 1, y - 22, 3, 18);
-  rect(ctx, "#7a5536", x, y - 21, 1, 17);
-  rect(ctx, OUTLINE, x + 1, y - 20, 7, 11);
-  rect(ctx, "#efe6d2", x + 2, y - 19, 5, 9);
-  rect(ctx, "#cfc5b2", x + 2, y - 12, 5, 2);
+  // Painted fiberglass topsides + red/navy racing trim + shaded keel
+  rect(ctx, "#f0eadc", x - 19, y - 6, 38, 4);
+  rect(ctx, "#ffffff", x - 18, y - 6, 36, 1);
+  rect(ctx, "#c8382c", x - 19, y - 3, 38, 1);
+  rect(ctx, "#234a66", x - 18, y - 2, 36, 3);
+  rect(ctx, "#163044", x - 16, y + 1, 32, 2);
+  rect(ctx, "#f0eadc", prowX + 1, y - 7, 3, 3);
 
-  // Warm bow lantern
-  const lx = dir < 0 ? x - 10 : x + 9;
-  rect(ctx, OUTLINE, lx, y - 10, 3, 6);
-  rect(ctx, "#ffd56a", lx + 1, y - 9, 1, 3);
-  rect(ctx, "#fff8d0", lx + 1, y - 8, 1, 1);
+  // Interior console, angled windshield & bench seat
+  const cabX = x + f * 2 - 7;
+  rect(ctx, OUTLINE, cabX - 1, y - 15, 14, 9);
+  rect(ctx, "#d8d0c0", cabX, y - 14, 12, 8);
+  rect(ctx, "#8fd0e8", cabX + (f < 0 ? 1 : 3), y - 13, 8, 5);
+  rect(ctx, "#d8f4ff", cabX + (f < 0 ? 2 : 4), y - 12, 4, 2);
+  // Dark slanted windshield frame
+  const wsX = f < 0 ? cabX - 2 : cabX + 11;
+  rect(ctx, OUTLINE, wsX, y - 13, 3, 7);
+  rect(ctx, "#a8e6f0", wsX + 1, y - 12, 1, 5);
+  // Cushioned pilot seat & wheel behind console
+  const seatX = x - f * 7 - 2;
+  rect(ctx, OUTLINE, seatX - 1, y - 11, 6, 5);
+  rect(ctx, "#7a442a", seatX, y - 10, 4, 4);
 
-  // Gentle water ripple right beneath the hull
-  rect(ctx, "#cfe9f0", x - 12 + (Math.floor(t * 4) % 3), wy + 2, 5, 1);
-  rect(ctx, "#6fa3b8", x + 2 - (Math.floor(t * 4) % 3), wy + 2, 6, 1);
+  // Outboard motor mounted on the stern
+  const sternX = x - f * 18 - (f > 0 ? 5 : 0);
+  rect(ctx, OUTLINE, sternX - 1, y - 13, 7, 9);
+  rect(ctx, "#3e4652", sternX, y - 12, 5, 7);
+  rect(ctx, "#6b7687", sternX + 1, y - 11, 3, 3);
+  rect(ctx, "#c8382c", sternX, y - 10, 5, 1);
+  // Engine shaft & prop foam into water
+  rect(ctx, OUTLINE, sternX + 2, y - 4, 2, 6);
+  rect(ctx, "#2b323b", sternX + 2, y - 3, 1, 4);
+  const foam = Math.floor(t * 7) % 2;
+  rect(ctx, "#ffffff", sternX + (f > 0 ? -3 - foam : 5 + foam), wy + 1, 4, 1);
+  rect(ctx, "#cfe9f0", sternX + (f > 0 ? -5 : 4), wy + 2, 6, 1);
+
+  // Bow spotlight / navigation lantern
+  const lx = f < 0 ? x - 21 : x + 18;
+  rect(ctx, OUTLINE, lx, y - 12, 3, 5);
+  rect(ctx, "#ffd56a", lx + 1, y - 11, 1, 3);
+  rect(ctx, "#ffffff", lx + 1, y - 10, 1, 1);
+
+  // Shimmering lake ripples beneath the motor boat
+  const rip = Math.floor(t * 4) % 4;
+  rect(ctx, "#cfe9f0", x - 16 + rip, wy + 3, 7, 1);
+  rect(ctx, "#6fa3b8", x + 2 - rip, wy + 3, 9, 1);
 }
 
 /** Earthy cone-shaped anthill mound on the far shore. (x, gy) = ground center. */

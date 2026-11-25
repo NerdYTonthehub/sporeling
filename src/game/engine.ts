@@ -2521,8 +2521,8 @@ export class Game {
     }
     this.drawGround(cx, cy);
     for (const pd of this.world.puddles) this.drawPuddle(pd, cx, cy);
-    const boatX = PIER_X0 - 15;
-    if (boatX - cx > -30 && boatX - cx < W + 30) {
+    const boatX = PIER_X0 - 22;
+    if (boatX - cx > -36 && boatX - cx < W + 36) {
       drawBoat(ctx, Math.round(boatX - cx), Math.round(LAKE_Y - cy), this.time, -1);
     }
     for (const v of this.world.villages) this.drawVillage(v, cx, cy, night);
@@ -2670,8 +2670,8 @@ export class Game {
 
     // Pier on right edge + return ferry boat bobbing on water
     this.drawPlatform(shore.pier, cx, cy);
-    const retBoatX = shore.pier.x + shore.pier.w + 15;
-    if (retBoatX - cx > -30 && retBoatX - cx < W + 30) {
+    const retBoatX = shore.pier.x + shore.pier.w + 22;
+    if (retBoatX - cx > -36 && retBoatX - cx < W + 36) {
       drawBoat(ctx, Math.round(retBoatX - cx), Math.round(LAKE_Y - cy), this.time, 1);
     }
 
@@ -3034,8 +3034,8 @@ export class Game {
       // Dirt & deep soil
       rect(ctx, "#3a2a1f", x, y, 1, H - y);
       if (y + 14 < H) rect(ctx, "#2b1f17", x, y + 14, 1, H - y - 14);
-      if (wx < LAKE_EDGE + 26) {
-        // Sandy shore rising out of the Great Lake
+      if (wx < LAKE_EDGE + 66) {
+        // Sandy beach rising out of the Great Lake under the lighthouse
         rect(ctx, "#9e8658", x, y + 2, 1, 3);
         rect(ctx, "#cbb483", x, y, 1, 2);
         if (hash1(wx, 6) < 0.35) rect(ctx, "#e3d1a2", x, y, 1, 1);
@@ -3427,27 +3427,27 @@ export class Game {
     }
     // Lighthouse lantern & rotating beacon cone + harbor boat lantern
     const lhx = Math.round(LIGHTHOUSE_X - cx);
-    const lhy = Math.round(this.groundAt(LIGHTHOUSE_X) - cy - 64);
+    const lhy = Math.round(this.groundAt(LIGHTHOUSE_X) - cy - 82);
     if (lhx > -180 && lhx < this.W + 180) {
-      glow(lhx, lhy, 32, "255,220,120", 0.25 + night * 0.45);
+      glow(lhx, lhy, 36, "255,220,120", 0.25 + night * 0.45);
       const beamDir = Math.sin(this.time * 1.1);
       if (Math.abs(beamDir) > 0.15) {
-        const reach = beamDir * 135;
-        const bg = ctx.createLinearGradient(lhx, lhy, lhx + reach, lhy + 12);
+        const reach = beamDir * 145;
+        const bg = ctx.createLinearGradient(lhx, lhy, lhx + reach, lhy + 14);
         bg.addColorStop(0, `rgba(255,235,150,${(0.18 + night * 0.28).toFixed(3)})`);
         bg.addColorStop(1, "rgba(255,235,150,0)");
         ctx.fillStyle = bg;
         ctx.beginPath();
         ctx.moveTo(lhx, lhy - 2);
-        ctx.lineTo(lhx + reach, lhy - 18);
-        ctx.lineTo(lhx + reach, lhy + 22);
+        ctx.lineTo(lhx + reach, lhy - 20);
+        ctx.lineTo(lhx + reach, lhy + 24);
         ctx.lineTo(lhx, lhy + 2);
         ctx.closePath();
         ctx.fill();
       }
     }
-    const boatLx = Math.round(PIER_X0 - 25 - cx);
-    glow(boatLx, Math.round(LAKE_Y - 8 - cy), 22, "255,210,105", 0.2 + night * 0.4);
+    const boatLx = Math.round(PIER_X0 - 42 - cx);
+    glow(boatLx, Math.round(LAKE_Y - 10 - cy), 24, "255,210,105", 0.22 + night * 0.42);
 
     if (night > 0.05) {
       for (const d of this.world.decor) {
