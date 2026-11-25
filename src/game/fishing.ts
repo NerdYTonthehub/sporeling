@@ -12,7 +12,43 @@ export interface FishSpecies {
 }
 
 export const GODLY_CHANCE = 0.02;
+export const GODLY_PITY_LIMIT = 50;
+/** 5 meters from the pool edge (1 meter/step = 8px). */
+export const PUDDLE_STAY_RADIUS = 40;
 export const MAX_HOLY_TRIES = 3;
+
+export interface FishingStreak {
+  puddleX: number;
+  puddleHalf: number;
+  poolY: number;
+  catches: number;
+}
+
+export function isWithinPoolRadius(
+  streak: Pick<FishingStreak, "puddleX" | "puddleHalf" | "poolY">,
+  px: number,
+  py: number,
+  radius = PUDDLE_STAY_RADIUS,
+): boolean {
+  const edgeDist = Math.max(0, Math.abs(px - streak.puddleX) - streak.puddleHalf);
+  return edgeDist <= radius && Math.abs(py - streak.poolY) <= radius;
+}
+
+export function advanceFishingStreak(
+  streak: FishingStreak | null,
+  puddle: { x: number; half: number; y: number },
+  caughtId: string,
+  hasDoubleJump: boolean,
+): FishingStreak | null {
+  if (!hasDoubleJump) return null;
+  const base = streak && streak.puddleX === puddle.x ? streak.catches : 0;
+  return {
+    puddleX: puddle.x,
+    puddleHalf: puddle.half,
+    poolY: puddle.y,
+    catches: caughtId === "godly" ? 0 : base + 1,
+  };
+}
 
 export const FISH: FishSpecies[] = [
   { id: "minnow", name: "Puddle Minnow", body: "#9fb7c4", belly: "#e6eef0", fin: "#6f8a99", weight: 40, value: 2 },
@@ -31,9 +67,9 @@ export const WAIT_MAX = 6;
 
 export const rollWait = (r: number) => WAIT_MIN + r * (WAIT_MAX - WAIT_MIN);
 
-export function rollFish(r: number, hasDoubleJump = false): FishSpecies {
+export function rollFish(r: number, hasDoubleJump = false, catchesAtPool = 0): FishSpecies {
   const godly = FISH.find((f) => f.id === "godly")!;
-  if (hasDoubleJump && r < GODLY_CHANCE) return godly;
+  if (hasDoubleJump && (catchesAtPool + 1 >= GODLY_PITY_LIMIT || r < GODLY_CHANCE)) return godly;
   const norm = hasDoubleJump ? (r - GODLY_CHANCE) / (1 - GODLY_CHANCE) : r;
   const pool = FISH.filter((f) => f.weight > 0);
   const total = pool.reduce((s, f) => s + f.weight, 0);
