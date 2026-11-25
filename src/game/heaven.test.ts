@@ -18,8 +18,14 @@ describe("Heaven arena and Goldfish of Destruction", () => {
     expect(h.god.maxHp).toBe(GOD_HP);
   });
 
-  it("cycles through all 4 God boss attacks", () => {
-    expect([0, 1, 2, 3].map(nextGodAttack)).toEqual(["fish_bombs", "hand_smash", "light_beam", "dash"]);
+  it("picks boss attacks in random order without repeating the same attack twice in a row", () => {
+    const firstChoices = new Set([0, 0.25, 0.5, 0.75].map((r) => nextGodAttack(null, r)));
+    expect(firstChoices).toEqual(new Set(["fish_bombs", "hand_smash", "light_beam", "dash"]));
+    for (const prev of firstChoices) {
+      for (const r of [0, 0.34, 0.67, 0.99]) {
+        expect(nextGodAttack(prev, r)).not.toBe(prev);
+      }
+    }
   });
 
   it("sweeping light beam stops before the screen edges so standing at the edge avoids it", () => {

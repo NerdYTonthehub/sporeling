@@ -256,8 +256,25 @@ export function generateWorld(seed = 1337, doorIndex?: number): { world: World; 
   }
   const nearPuddle = (x: number, pad: number) => puddles.some((pd) => Math.abs(x - pd.x) < pd.half + pad);
 
+  const p1 = rr(0, Math.PI * 2);
+  const p2 = rr(0, Math.PI * 2);
+  const p3 = rr(0, Math.PI * 2);
+  const p4 = rr(0, Math.PI * 2);
+  const f1 = rr(140, 250);
+  const f2 = rr(55, 95);
+  const f3 = rr(390, 660);
+  const f4 = rr(250, 410);
+  const a1 = rr(7, 13);
+  const a2 = rr(3, 6);
+  const a3 = rr(9, 16);
+  const a4 = rr(4, 9);
+
   const rawGround = (x: number) =>
-    GROUND_BASE + Math.sin(x / 190) * 9 + Math.sin(x / 71 + 1.3) * 4 + Math.sin(x / 523 + 4) * 12;
+    GROUND_BASE +
+    Math.sin(x / f1 + p1) * a1 +
+    Math.sin(x / f2 + p2) * a2 +
+    Math.sin(x / f3 + p3) * a3 +
+    Math.cos(x / f4 + p4) * a4;
 
   const groundY = (x: number) => {
     // the Great Lake: flat water surface, then a sandy shore rising out of it

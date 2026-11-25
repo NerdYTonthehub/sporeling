@@ -10,7 +10,7 @@ export const HEAVEN_FLOOR_Y = 178;
 /** Safe standing margin at both screen edges where the light beam stops short. */
 export const BEAM_EDGE_SAFE = 26;
 export const BEAM_HALF_W = 9;
-export const GOD_HP = 8;
+export const GOD_HP = 10;
 export const GOD_BOMB_DAMAGE = 16;
 export const GOD_SMASH_DAMAGE = 22;
 export const GOD_BEAM_DAMAGE = 18;
@@ -50,6 +50,7 @@ export interface GodBoss {
   timer: number;
   hitT: number;
   attackIdx: number;
+  lastAttack: GodAttack | null;
   bombsLeft: number;
   bombCd: number;
   handSide: -1 | 1;
@@ -73,7 +74,7 @@ export interface HeavenState {
   defeatTimer: number;
 }
 
-const ATTACK_ORDER: GodAttack[] = ["fish_bombs", "hand_smash", "light_beam", "dash"];
+export const ATTACK_ORDER: GodAttack[] = ["fish_bombs", "hand_smash", "light_beam", "dash"];
 
 export function createHeaven(arenaW: number, sacrificedIds: string[]): HeavenState {
   const w = Math.max(280, arenaW);
@@ -109,9 +110,10 @@ export function createHeaven(arenaW: number, sacrificedIds: string[]): HeavenSta
       maxHp: GOD_HP,
       phase: "arrive",
       sub: "windup",
-      timer: 0.9,
+      timer: 1.5,
       hitT: 0,
       attackIdx: 0,
+      lastAttack: null,
       bombsLeft: 0,
       bombCd: 0,
       handSide: 1,
@@ -149,9 +151,11 @@ export function stompHitsDashGod(god: GodBoss, px: number, py: number, pvy: numb
   return pvy > 15 && Math.abs(px - god.x) < 20 && py >= god.y - 46 && py <= god.y - 12;
 }
 
-/** Next attack in rotation. */
-export function nextGodAttack(idx: number): GodAttack {
-  return ATTACK_ORDER[idx % ATTACK_ORDER.length]!;
+/** Pick a random next attack (never repeating the immediately previous one). */
+export function nextGodAttack(prev: GodAttack | null = null, r = Math.random()): GodAttack {
+  const pool = prev ? ATTACK_ORDER.filter((a) => a !== prev) : ATTACK_ORDER;
+  const clamped = Math.max(0, Math.min(0.999999, r));
+  return pool[Math.floor(clamped * pool.length)]!;
 }
 
 /** Resolves inventory & try count after a Heaven fight ends (either winning or losing). */
@@ -331,11 +335,13 @@ export function drawHeavenEffects(ctx: Ctx, h: HeavenState) {
     drawGodBoss(ctx, Math.round(g.x), Math.round(g.y), {
       t: h.t,
       flash,
+      phase: g.phase,
+      sub: g.sub,
       hideHandSide: g.phase === "hand_smash" ? g.handSide : undefined,
       dashDir: g.phase === "dash" ? g.dashDir : undefined,
     });
     if (g.phase === "hand_smash") {
-      drawBigHand(ctx, Math.round(g.handX), Math.round(g.handY), flash);
+      drawBigHand(ctx, Math.round(g.handX), Math.round(g.handY), flash, g.sub, h.t);
     }
   }
 

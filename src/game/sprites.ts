@@ -74,17 +74,45 @@ export interface PersonOpts {
   armsUp?: boolean;
   /** Seated on a campfire log. */
   sitting?: boolean | undefined;
+  /** Normalized sword swing progress 0..1 when attacking. */
+  attack?: number | undefined;
+  /** Fishing animation state when holding rod. */
+  fishing?: { phase: "wait" | "bite"; t: number } | undefined;
   /** side (default), front = facing the camera, back = facing away (top-down rooms). */
   view?: "side" | "front" | "back";
 }
 
 /** A tiny mushroom person. (x, y) = feet position (y is the ground row). */
-export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts) {
+export function drawMushroomPerson(ctx: Ctx, baseX: number, y: number, o: PersonOpts) {
   const s = o.scale ?? 1;
   const f = o.facing >= 0 ? 1 : -1;
   const bodyW = s >= 1.1 ? 10 : s < 0.85 ? 6 : 8;
   const bodyH = Math.max(5, Math.round(7 * s));
-  const legH = o.sitting ? 2 : 3;
+  const atk = o.attack;
+  const fish = o.fishing;
+  const atkSquash = atk !== undefined && atk >= 0.18 && atk <= 0.72 ? 1 : 0;
+  const fishDip =
+    fish && fish.phase === "wait" && fish.t < 0.35
+      ? 1
+      : fish && fish.phase === "bite"
+        ? Math.floor(fish.t * 14) % 2
+        : 0;
+  const leanX =
+    atk !== undefined
+      ? atk < 0.2
+        ? -f
+        : atk < 0.75
+          ? f * 2
+          : f
+      : fish
+        ? fish.phase === "bite"
+          ? -f
+          : fish.t < 0.35
+            ? f
+            : 0
+        : 0;
+  const x = baseX + leanX;
+  const legH = o.sitting ? 2 : Math.max(2, 3 - atkSquash - fishDip);
   let capW = Math.round(14 * s);
   if (capW % 2) capW++;
   const capH = Math.max(4, Math.round(6 * s));
@@ -103,6 +131,10 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
   } else if (o.air) {
     parts.push([x - 2, bodyBottom, 1, 2, LEG], [x + 1, bodyBottom, 1, 2, LEG]);
     parts.push([x - 3, bodyBottom + 2, 2, 1, SHOE], [x + 1, bodyBottom + 2, 2, 1, SHOE]);
+  } else if (atk !== undefined) {
+    const stride = atk < 0.2 ? 0 : 1;
+    parts.push([x - 2 - stride, bodyBottom, 1, legH, LEG], [x + 1 + stride, bodyBottom, 1, legH, LEG]);
+    parts.push([x - 3 - stride, y - 1, 2, 1, SHOE], [x + 1 + stride, y - 1, 2, 1, SHOE]);
   } else {
     const a = o.view && o.view !== "side" ? 0 : Math.round(sw * 1.4);
     const liftA = sw > 0.5 ? 1 : 0;
@@ -126,6 +158,31 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
       const outX = side < 0 ? x - half - 1 : x + half;
       parts.push([outX, capTopY - 1, 1, ay - 3 - capTopY + 2, BODY]);
       parts.push([outX - side, capTopY - 2, 1, 1, BODY], [outX - side * 2, capTopY - 3, 1, 1, BODY]);
+    }
+  } else if (atk !== undefined) {
+    const backSide = -f;
+    const bx = backSide < 0 ? bl - 1 : bl + bodyW;
+    parts.push([bx, ay, 1, 2, BODY], [bx + backSide, ay + 1, 1, 2, BODY]);
+    const fx = f > 0 ? bl + bodyW : bl - 1;
+    if (atk < 0.22) {
+      parts.push([fx - f, ay - 2, 2, 2, BODY], [fx - f * 2, ay - 4, 2, 2, BODY]);
+    } else if (atk < 0.65) {
+      parts.push([fx, ay, 2, 2, BODY], [fx + f * 2, ay, 2, 2, BODY]);
+    } else {
+      parts.push([fx, ay + 1, 2, 2, BODY], [fx + f * 2, ay + 2, 2, 2, BODY]);
+    }
+  } else if (fish) {
+    const backX = f > 0 ? bl - 1 : bl + bodyW;
+    const frontX = f > 0 ? bl + bodyW : bl - 1;
+    const bob = fish.phase === "bite" ? (Math.floor(fish.t * 14) % 2 ? -1 : 1) : Math.round(Math.sin(fish.t * 2.6));
+    if (fish.phase === "wait" && fish.t < 0.35) {
+      // Casting motion
+      parts.push([backX, ay, 1, 2, BODY]);
+      parts.push([frontX, ay - 2, 1, 2, BODY], [frontX + f, ay - 4, 2, 2, BODY]);
+    } else {
+      // Holding rod with both hands angled toward the water
+      parts.push([backX, ay + 1, 1, 2, BODY]);
+      parts.push([frontX, ay + 1 + bob, 2, 2, BODY], [frontX + f * 2, ay + bob, 2, 2, BODY]);
     }
   } else if (o.air) {
     parts.push([bl - 1, ay - 1, 1, 2, BODY], [bl - 2, ay - 3, 1, 2, BODY]);
@@ -177,6 +234,14 @@ export function drawMushroomPerson(ctx: Ctx, x: number, y: number, o: PersonOpts
   if (o.blink) {
     rect(ctx, OUTLINE, ex - 2, ey + 1, 1, 1);
     rect(ctx, OUTLINE, ex + 1, ey + 1, 1, 1);
+  } else if (atk !== undefined) {
+    // Determined fighting eyes
+    rect(ctx, OUTLINE, ex - 2, ey + 1, 2, 1);
+    rect(ctx, OUTLINE, ex + 1, ey, 1, 2);
+  } else if (fish && fish.phase === "bite") {
+    // Wide alert eyes when pulling a biting fish
+    rect(ctx, OUTLINE, ex - 2, ey - 1, 1, 3);
+    rect(ctx, OUTLINE, ex + 1, ey - 1, 1, 3);
   } else {
     rect(ctx, OUTLINE, ex - 2, ey, 1, 2);
     rect(ctx, OUTLINE, ex + 1, ey, 1, 2);
@@ -590,6 +655,8 @@ export function drawSword(ctx: Ctx, hx: number, hy: number, a: number) {
 export interface GodBossOpts {
   t: number;
   flash: boolean;
+  phase?: string | undefined;
+  sub?: "windup" | "strike" | "recover" | undefined;
   hideHandSide?: -1 | 1 | undefined;
   dashDir?: number | undefined;
 }
@@ -612,19 +679,53 @@ export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
   const GOLD = C("#ffe46b");
   const dark = OUTLINE;
 
-  const flap = Math.round(Math.sin(o.t * 4.5) * 2);
-  const crouch = o.dashDir ? 4 : 0;
-  const by = y + crouch;
+  const isDash = o.phase === "dash";
+  const isBeam = o.phase === "light_beam";
+  const isBombs = o.phase === "fish_bombs";
+  const isDefeated = o.phase === "defeated";
+  const isWindup = o.sub === "windup";
+  const isStrike = o.sub === "strike";
+
+  const flapFreq = isDash || isWindup ? 10.5 : isBeam ? 7 : 4.5;
+  const flapAmp = isDash ? 3 : isWindup ? 2.5 : 2;
+  const flap = Math.round(Math.sin(o.t * flapFreq) * flapAmp) + (isDefeated ? 3 : 0);
+  const crouch = isDash ? (isWindup ? 5 : 4) : isBombs && isWindup ? -1 : 0;
+  const breathe = isDash ? 0 : Math.round(Math.sin(o.t * 3.2) * 0.6);
+  const by = y + crouch + breathe;
+  const headY = by - 36;
+  const tailSway = Math.round(Math.sin(o.t * (isDash ? 14 : 5.5)) * (isDash ? 2.5 : 1.5));
+
+  // 0. Radiant halo ring & speed streaks behind boss
+  if (!isDefeated) {
+    const haloR = 13 + (isWindup ? Math.round(Math.sin(o.t * 14)) : 0);
+    ctx.globalAlpha = isWindup || isBeam ? 0.5 : 0.28;
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, headY, haloR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  if (isDash && isStrike && o.dashDir) {
+    const d = -o.dashDir;
+    for (let i = 0; i < 4; i++) {
+      const len = 10 + ((Math.floor(o.t * 24) + i * 3) % 8);
+      rect(ctx, i % 2 ? "#ffffff" : GOLD, x + d * (14 + i * 4), by - 34 + i * 8, len, 1);
+    }
+  }
 
   // 1. Outstretched angel wings (behind body)
+  const sweepBack = isDash && isStrike ? -2 : 0;
   for (const side of [-1, 1] as const) {
+    const sFlap = side * 0.25;
+    const fLift = Math.round(flap + Math.sin(o.t * flapFreq + sFlap));
     const featherSpecs: [number, number, number, number][] = [
-      [8, -28 + flap, 7, 10],
-      [14, -31 + flap, 8, 11],
-      [21, -33 + flap, 8, 10],
-      [27, -33 + flap, 7, 8],
-      [11, -20 + flap, 7, 6],
-      [18, -22 + flap, 7, 6],
+      [8, -28 + fLift, 7, 10],
+      [14 + sweepBack, -31 + fLift, 8, 11],
+      [21 + sweepBack, -33 + fLift, 8, 10],
+      [27 + sweepBack, -33 + fLift, 7, 8],
+      [11, -20 + fLift, 7, 6],
+      [18 + sweepBack, -22 + fLift, 7, 6],
     ];
     for (const [dx, dy, w, h] of featherSpecs) {
       const wx = side > 0 ? x + dx : x - dx - w;
@@ -637,22 +738,24 @@ export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
     }
   }
 
-  // 2. Forked fish-tail base + lower body
+  // 2. Forked fish-tail base + lower body (swishing smoothly)
   const tailParts: R[] = [
     [x - 4, by - 14, 8, 10, SKIN],
-    [x - 7, by - 5, 6, 3, SKIN],
-    [x + 1, by - 5, 6, 3, SKIN],
-    [x - 10, by - 3, 7, 3, SKIN],
-    [x + 3, by - 3, 7, 3, SKIN],
+    [x - 7 + tailSway, by - 5, 6, 3, SKIN],
+    [x + 1 + tailSway, by - 5, 6, 3, SKIN],
+    [x - 10 + tailSway, by - 3, 7, 3, SKIN],
+    [x + 3 + tailSway, by - 3, 7, 3, SKIN],
   ];
-  // 3. Outstretched arms (omitting a hand if it's currently enlarged for smash)
+  // 3. Animated arms depending on attack phase (omitting enlarged smash hand)
+  const armRaise =
+    isBeam || (isBombs && isWindup) ? -5 : isBombs && isStrike ? 2 : isDash && isWindup ? 3 : Math.round(Math.sin(o.t * 4) * 1);
   for (const side of [-1, 1] as const) {
     if (o.hideHandSide === side) continue;
     const ax = side > 0 ? x + 5 : x - 14;
-    tailParts.push([ax, by - 25, 9, 4, SKIN]);
+    tailParts.push([ax, by - 25 + Math.round(armRaise * 0.5), 9, 4, SKIN]);
     const hx = side > 0 ? x + 13 : x - 17;
-    tailParts.push([hx, by - 26, 4, 5, SKIN]);
-    tailParts.push([hx + (side > 0 ? 1 : 0), by - 27, 2, 2, SKIN_L]);
+    tailParts.push([hx, by - 26 + armRaise, 4, 5, SKIN]);
+    tailParts.push([hx + (side > 0 ? 1 : 0), by - 27 + armRaise, 2, 2, SKIN_L]);
   }
   // 4. Torso under the toga
   tailParts.push([x - 5, by - 27, 10, 14, SKIN]);
@@ -664,15 +767,16 @@ export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
   // Tail highlight / shading
   rect(ctx, SKIN_L, x - 3, by - 13, 2, 8);
   rect(ctx, SKIN_D, x + 2, by - 13, 2, 8);
-  rect(ctx, SKIN_D, x - 9, by - 1, 5, 1);
-  rect(ctx, SKIN_D, x + 4, by - 1, 5, 1);
+  rect(ctx, SKIN_D, x - 9 + tailSway, by - 1, 5, 1);
+  rect(ctx, SKIN_D, x + 4 + tailSway, by - 1, 5, 1);
 
-  // 5. White toga draped diagonally from left shoulder across waist
+  // 5. White toga draped diagonally from left shoulder across waist (subtle hem flutter)
+  const flutter = Math.floor(o.t * 5) % 2;
   const togaParts: R[] = [
     [x - 5, by - 27, 5, 4, TOGA],
     [x - 6, by - 23, 8, 5, TOGA],
     [x - 6, by - 18, 12, 5, TOGA],
-    [x - 7, by - 13, 13, 3, TOGA],
+    [x - 7, by - 13, 13, 3 + flutter, TOGA],
   ];
   ctx.fillStyle = dark;
   for (const p of togaParts) ctx.fillRect(p[0] - 1, p[1] - 1, p[2] + 2, p[3] + 2);
@@ -684,26 +788,57 @@ export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
   rect(ctx, GOLD, x - 5, by - 27, 2, 2);
 
   // 6. Round goldfish head + top fin crest
-  const headY = by - 36;
   ctx.fillStyle = dark;
   fillCircle(ctx, x, headY, 10);
-  // Top dorsal spike
+  // Top dorsal spike (glows brighter when winding up attacks)
   rect(ctx, dark, x - 2, headY - 14, 4, 6);
-  rect(ctx, SKIN, x - 1, headY - 13, 2, 5);
+  rect(ctx, isWindup || isBeam ? GOLD : SKIN, x - 1, headY - 13, 2, 5);
   ctx.fillStyle = SKIN;
   fillCircle(ctx, x, headY, 9);
   ctx.fillStyle = SKIN_L;
   fillCircle(ctx, x - 2, headY - 3, 5);
   rect(ctx, SKIN_D, x + 4, headY - 4, 4, 7);
 
-  // Glowing white eyes + tiny 'o' mouth
-  rect(ctx, "#fff6b8", x - 6, headY - 2, 4, 4);
-  rect(ctx, "#fff6b8", x + 2, headY - 2, 4, 4);
-  rect(ctx, "#ffffff", x - 5, headY - 1, 2, 2);
-  rect(ctx, "#ffffff", x + 3, headY - 1, 2, 2);
-  rect(ctx, "#7a2c08", x - 1, headY + 4, 2, 2);
+  // Expressive eyes & mouth per boss phase
+  if (isDefeated) {
+    // X-eyes when defeated
+    rect(ctx, "#fff6b8", x - 6, headY - 2, 4, 3);
+    rect(ctx, "#fff6b8", x + 2, headY - 2, 4, 3);
+    rect(ctx, dark, x - 5, headY - 1, 2, 1);
+    rect(ctx, dark, x + 3, headY - 1, 2, 1);
+    rect(ctx, "#7a2c08", x - 2, headY + 4, 4, 2);
+  } else if (isDash) {
+    // Fierce squinted eyes pointing in dashDir
+    rect(ctx, "#ffe46b", x - 6, headY - 1, 4, 2);
+    rect(ctx, "#ffe46b", x + 2, headY - 1, 4, 2);
+    rect(ctx, "#ffffff", x - 5, headY - 1, 2, 1);
+    rect(ctx, "#ffffff", x + 3, headY - 1, 2, 1);
+    rect(ctx, dark, x - 6, headY - 2, 4, 1);
+    rect(ctx, dark, x + 2, headY - 2, 4, 1);
+    rect(ctx, "#7a2c08", x - 1, headY + 4, 3, 2);
+  } else if (isBeam) {
+    // Intense blazing eyes during beam attack
+    const eyeCol = Math.floor(o.t * 16) % 2 ? "#ffffff" : "#9ff6ff";
+    rect(ctx, "#ffe46b", x - 6, headY - 3, 4, 5);
+    rect(ctx, "#ffe46b", x + 2, headY - 3, 4, 5);
+    rect(ctx, eyeCol, x - 5, headY - 2, 2, 3);
+    rect(ctx, eyeCol, x + 3, headY - 2, 2, 3);
+    rect(ctx, "#7a2c08", x - 2, headY + 3, 4, 3);
+  } else {
+    rect(ctx, "#fff6b8", x - 6, headY - 2, 4, 4);
+    rect(ctx, "#fff6b8", x + 2, headY - 2, 4, 4);
+    rect(ctx, "#ffffff", x - 5, headY - 1, 2, 2);
+    rect(ctx, "#ffffff", x + 3, headY - 1, 2, 2);
+    if (isBombs && isWindup) {
+      // Wide open mouth charging bombs
+      rect(ctx, "#7a2c08", x - 2, headY + 3, 4, 3);
+      rect(ctx, "#ff8b5c", x - 1, headY + 4, 2, 1);
+    } else {
+      rect(ctx, "#7a2c08", x - 1, headY + 4, 2, 2);
+    }
+  }
 
-  // Golden sparkles around God's head
+  // Golden sparkles orbiting God's head
   const spPhase = Math.floor(o.t * 6) % 2;
   for (const [sx, sy] of [
     [-12, -42],
@@ -719,18 +854,38 @@ export function drawGodBoss(ctx: Ctx, x: number, y: number, o: GodBossOpts) {
 }
 
 /** Enlarged orange-gold fist for God's Ground Smash attack. (x, y) = centre of fist. */
-export function drawBigHand(ctx: Ctx, x: number, y: number, flash = false) {
+export function drawBigHand(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  flash = false,
+  sub: "windup" | "strike" | "recover" = "windup",
+  t = 0,
+) {
+  const jitter = sub === "windup" ? (Math.floor(t * 28) % 2 ? -1 : 1) : 0;
+  const hx = x + jitter;
   const f = flash ? "#ffffff" : "#e2841c";
   const l = flash ? "#ffffff" : "#f8b93a";
   const d = flash ? "#ffffff" : "#b45b12";
-  rect(ctx, OUTLINE, x - 11, y - 9, 22, 18);
-  rect(ctx, OUTLINE, x - 13, y - 6, 26, 12);
-  rect(ctx, f, x - 10, y - 8, 20, 16);
-  rect(ctx, f, x - 12, y - 5, 24, 10);
-  rect(ctx, l, x - 8, y - 7, 14, 4);
-  rect(ctx, d, x - 10, y + 4, 20, 4);
+
+  if (sub === "windup") {
+    ctx.globalAlpha = 0.45 + Math.sin(t * 16) * 0.2;
+    rect(ctx, "#ffe46b", hx - 14, y - 10, 28, 20);
+    ctx.globalAlpha = 1;
+  } else if (sub === "strike") {
+    for (let i = 0; i < 4; i++) {
+      rect(ctx, i % 2 ? "#ffffff" : "#ffe46b", hx - 9 + i * 6, y - 22 - ((Math.floor(t * 30) + i * 3) % 6), 1, 12);
+    }
+  }
+
+  rect(ctx, OUTLINE, hx - 11, y - 9, 22, 18);
+  rect(ctx, OUTLINE, hx - 13, y - 6, 26, 12);
+  rect(ctx, f, hx - 10, y - 8, 20, 16);
+  rect(ctx, f, hx - 12, y - 5, 24, 10);
+  rect(ctx, l, hx - 8, y - 7, 14, 4);
+  rect(ctx, d, hx - 10, y + 4, 20, 4);
   // knuckle ridges
-  for (const kx of [-6, -1, 4]) rect(ctx, OUTLINE, x + kx, y + 3, 2, 5);
+  for (const kx of [-6, -1, 4]) rect(ctx, OUTLINE, hx + kx, y + 3, 2, 5);
 }
 
 /**
