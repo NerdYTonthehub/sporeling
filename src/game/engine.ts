@@ -89,6 +89,7 @@ const FADE = 0.5;
 /** Damage for falling into the dungeon's spike pit. */
 const PIT_DAMAGE = 15;
 const SHOCKWAVE_DAMAGE = 14;
+const LAKE_FISHING_SPOT: Puddle = { x: LAKE_EDGE - 55, half: 55 };
 
 export type Key = "left" | "right" | "up" | "down" | "jump" | "act" | "attack";
 export type Scene = "forest" | "dungeon" | "room" | "heaven";
@@ -133,6 +134,7 @@ export interface HudState {
   scene: Scene;
   doubleJump: boolean;
   godDefeated: boolean;
+  sitting: { from: string; destinations: { name: string; treetop: boolean; discovered: boolean }[] } | null;
   boss: { name: string; hp: number; max: number } | null;
 }
 
@@ -207,7 +209,8 @@ export class Game {
   private prompt: string | null = null;
   private nearNpc: Npc | null = null;
   private applesEaten = 0;
-  private mode: "walk" | "fishing" | "releasing" = "walk";
+  private mode: "walk" | "fishing" | "releasing" | "sitting" = "walk";
+  private sittingVillage: Village | null = null;
   private fishing: { puddle: Puddle; phase: "wait" | "bite"; t: number; waitFor: number; bobX: number } | null = null;
   private releasing: { fish: FishSpecies; t: number } | null = null;
   private catchAnim: { fish: FishSpecies; t: number; x0: number; y0: number } | null = null;
@@ -283,6 +286,7 @@ export class Game {
     this.dead = false;
     this.applesEaten = 0;
     this.mode = "walk";
+    this.sittingVillage = null;
     this.fishing = null;
     this.releasing = null;
     this.catchAnim = null;
@@ -658,7 +662,16 @@ export class Game {
         }
       }
     }
-    if (landed) {
+    if (this.mode === "sitting" && this.sittingVillage) {
+      p.y = this.villageFloor(this.sittingVillage) - 3;
+      p.vx = 0;
+      p.vy = 0;
+      p.onGround = true;
+      p.plat = null;
+      if (active && !this.fade && (this.keys.left || this.keys.right || this.pressed.has("jump") || this.pressed.has("up") || this.pressed.has("down"))) {
+        this.standUp();
+      }
+    } else if (landed) {
       if (!p.onGround && p.vy > 160) this.dust(p.x, p.y, 5);
       p.vy = 0;
       p.onGround = true;
@@ -1326,11 +1339,23 @@ export class Game {
     const tree = this.world.appleTrees.find(
       (t) => Math.abs(t.x - p.x) < 16 && Math.abs(this.groundAt(t.x) - p.y) < 30 && t.apples.some((a) => a.grown),
     );
-    const puddle =
-      p.onGround && !p.plat
+    const atLake = p.onGround && (p.plat?.kind === "pier" || (!p.plat && p.x <= LAKE_EDGE + 24));
+    const puddle = atLake
+      ? LAKE_FISHING_SPOT
+      : p.onGround && !p.plat
         ? this.world.puddles.find((pd) => Math.abs(p.x - pd.x) < pd.half + 12) ?? null
         : null;
     this.nearPuddle = puddle;
+
+    let logSpot: { v: Village; x: number } | null = null;
+    if (p.onGround && !p.plat) {
+      for (const v of this.world.villages) {
+        if (Math.abs(p.y - this.villageFloor(v)) > 4) continue;
+        for (const lx of [v.fireX - 16, v.fireX + 16]) {
+          if (Math.abs(p.x - lx) < 8) logSpot = { v, x: lx };
+        }
+      }
+    }
 
     if (this.talking?.npc && Math.abs(this.talking.npc.x - p.x) > 40) this.talking = null;
 
@@ -1338,12 +1363,13 @@ export class Game {
     else if (nearNpc) this.prompt = `${A} · talk to ${nearNpc.name}`;
     else if (house) this.prompt = `${A} · go inside`;
     else if (atElder) this.prompt = this.hasDoubleJump ? `${A} · enter the Elder Tree (cleared)` : `${A} · enter the Elder Tree`;
+    else if (logSpot) this.prompt = `Sit (${A})`;
     else if (tree) this.prompt = `${A} · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
     else if (puddle) {
       const streak = this.hasDoubleJump && this.fishingStreak?.puddleX === puddle.x ? this.fishingStreak.catches : 0;
-      this.prompt = streak > 0 ? `${A} · fish in the puddle (${streak}/${GODLY_PITY_LIMIT})` : `${A} · fish in the puddle`;
-    }
-    else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
+      const place = puddle === LAKE_FISHING_SPOT ? "Great Lake" : "puddle";
+      this.prompt = streak > 0 ? `${A} · fish in the ${place} (${streak}/${GODLY_PITY_LIMIT})` : `${A} · fish in the ${place}`;
+    } else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
     else this.prompt = null;
 
     if (this.pressed.has("act")) {
@@ -1356,6 +1382,8 @@ export class Game {
         this.enterHouse(house.v, house.h);
       } else if (atElder) {
         this.enterDungeon();
+      } else if (logSpot) {
+        this.sitOnLog(logSpot.v, logSpot.x);
       } else if (tree) {
         const a = tree.apples.find((x) => x.grown)!;
         a.grown = false;
@@ -1379,16 +1407,90 @@ export class Game {
     }
   }
 
+  // ---------- campfire log sitting & village teleportation ----------
+  private sitOnLog(v: Village, logX: number) {
+    const p = this.p;
+    p.x = logX;
+    p.y = this.villageFloor(v) - 3;
+    p.vx = 0;
+    p.vy = 0;
+    p.facing = logX < v.fireX ? 1 : -1;
+    p.plat = null;
+    p.onGround = true;
+    this.mode = "sitting";
+    this.sittingVillage = v;
+    this.talking = null;
+    this.prompt = null;
+    sfx.menu();
+  }
+
+  standUp() {
+    if (this.mode !== "sitting") return;
+    if (this.sittingVillage) {
+      this.p.y = this.villageFloor(this.sittingVillage);
+      this.p.vy = 0;
+      this.p.onGround = true;
+    }
+    this.mode = "walk";
+    this.sittingVillage = null;
+    this.emitHud();
+  }
+
+  teleportToVillage(name: string) {
+    const target = this.world.villages.find((v) => v.name === name);
+    if (!target || !this.running || this.dead || this.fade) return false;
+    sfx.discover();
+    this.transition(() => {
+      const p = this.p;
+      this.mode = "walk";
+      this.sittingVillage = null;
+      this.fishingStreak = null;
+      this.talking = null;
+      p.x = target.fireX - 16;
+      p.y = this.villageFloor(target);
+      p.vx = 0;
+      p.vy = 0;
+      p.facing = 1;
+      p.plat = null;
+      p.onGround = true;
+      target.discovered = true;
+      this.snapCamera();
+      this.camY = this.cameraTargetY();
+      for (let i = 0; i < 16; i++) {
+        this.spawn({
+          x: p.x + (Math.random() - 0.5) * 16,
+          y: p.y - 8 - Math.random() * 14,
+          vx: (Math.random() - 0.5) * 45,
+          vy: -20 - Math.random() * 40,
+          life: 0.9,
+          color: i % 2 ? "#ffd56a" : "#ff8c3a",
+          size: 1,
+          grav: 20,
+          kind: "spark",
+        });
+      }
+      this.banner = { title: target.name, sub: target.floorY !== undefined ? "Treetop village" : "Village", t: 3 };
+    });
+    return true;
+  }
+
   // ---------- fishing ----------
   private startFishing(pd: Puddle) {
     const p = this.p;
-    if (Math.abs(p.x - pd.x) > pd.half - 2) p.facing = pd.x >= p.x ? 1 : -1;
-    const bobX = clamp(p.x + p.facing * 16, pd.x - pd.half + 3, pd.x + pd.half - 3);
+    const isLake = pd === LAKE_FISHING_SPOT;
+    let bobX: number;
+    if (isLake) {
+      if (p.x >= LAKE_EDGE - 14) p.facing = -1;
+      bobX = clamp(p.x + p.facing * 20, PIER_X0 - 24, LAKE_EDGE - 4);
+    } else {
+      if (Math.abs(p.x - pd.x) > pd.half - 2) p.facing = pd.x >= p.x ? 1 : -1;
+      bobX = clamp(p.x + p.facing * 16, pd.x - pd.half + 3, pd.x + pd.half - 3);
+    }
     p.vx = 0;
     this.mode = "fishing";
     this.talking = null;
     this.fishing = { puddle: pd, phase: "wait", t: 0, waitFor: rollWait(Math.random()), bobX };
-    this.ripple(bobX, this.groundAt(pd.x));
+    this.ripple(bobX, isLake ? LAKE_Y : this.groundAt(pd.x));
     sfx.cast();
   }
 
@@ -1411,7 +1513,7 @@ export class Game {
     const f = this.fishing;
     if (!f) return;
     f.t += dt;
-    const wy = this.groundAt(f.puddle.x);
+    const wy = f.puddle === LAKE_FISHING_SPOT ? LAKE_Y : this.groundAt(f.puddle.x);
     if (this.keys.left || this.keys.right || this.pressed.has("act")) {
       this.pressed.delete("act");
       this.endFishing("You reeled in your line.");
@@ -1997,6 +2099,15 @@ export class Game {
       scene: this.scene,
       doubleJump: this.hasDoubleJump,
       godDefeated: this.godDefeated,
+      sitting:
+        this.mode === "sitting" && this.sittingVillage
+          ? {
+              from: this.sittingVillage.name,
+              destinations: this.world.villages
+                .filter((v) => v.name !== this.sittingVillage?.name)
+                .map((v) => ({ name: v.name, treetop: v.floorY !== undefined, discovered: v.discovered })),
+            }
+          : null,
       boss,
     });
   }
@@ -2216,6 +2327,7 @@ export class Game {
         scale: 1,
         blink: this.dead || p.blinkT < 0,
         armsUp: this.mode === "releasing" && (this.releasing?.t ?? 0) > 0.15,
+        sitting: this.mode === "sitting",
       });
       ctx.globalAlpha = 1;
     }
@@ -2637,11 +2749,16 @@ export class Game {
       rect(ctx, "#ffc24a", fx - 2 + i, gy - 3 - Math.floor(h / 2), 1, Math.floor(h / 2));
     }
     rect(ctx, "#fff1a8", fx, gy - 5, 1, 2);
-    // log benches
-    rect(ctx, "#5a3c26", fx - 20, gy - 3, 9, 3);
-    rect(ctx, "#8a6342", fx - 20, gy - 3, 9, 1);
-    rect(ctx, "#5a3c26", fx + 12, gy - 3, 9, 3);
-    rect(ctx, "#8a6342", fx + 12, gy - 3, 9, 1);
+    // wooden log benches around the campfire
+    for (const lx of [fx - 21, fx + 12]) {
+      rect(ctx, "#1b140f", lx - 1, gy - 5, 11, 5);
+      rect(ctx, "#5a3c26", lx, gy - 4, 9, 4);
+      rect(ctx, "#8a6342", lx, gy - 4, 9, 2);
+      rect(ctx, "#b38a54", lx + 1, gy - 4, 7, 1);
+      // cut log end facing outward
+      const endX = lx < fx ? lx : lx + 7;
+      rect(ctx, "#d4b483", endX, gy - 3, 2, 2);
+    }
   }
 
   private drawBubble(x: number, y: number) {
@@ -2698,7 +2815,7 @@ export class Game {
       const ty = py - 18;
       drawLine(ctx, hx, hy, tx, ty, "#2a1d14");
       drawLine(ctx, hx, hy - 1, tx - f, ty, "#8a6342");
-      const wy = this.groundAt(fish.puddle.x) - cy;
+      const wy = (fish.puddle === LAKE_FISHING_SPOT ? LAKE_Y : this.groundAt(fish.puddle.x)) - cy;
       const bx = Math.round(fish.bobX - cx);
       const dip = fish.phase === "bite" ? (Math.floor(this.time * 16) % 2) + 1 : Math.round(Math.sin(this.time * 3)) > 0 ? 0 : 1;
       drawLine(ctx, tx, ty, bx, wy - 2 + dip, "#d9d2c0");

@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { generateWorld, surfaceY } from "./world";
+import { TOTAL_VILLAGES, generateWorld, surfaceY } from "./world";
 import { createDungeon } from "./dungeon";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, moveInRoom } from "./interior";
 import { sectionCleared } from "./combat";
 
 describe("forest exploration", () => {
-  it("has exactly two treetop villages", () => {
+  it("has exactly two ground-level and two treetop villages", () => {
     const { world } = generateWorld(1337);
+    expect(world.villages.filter((v) => v.floorY === undefined)).toHaveLength(2);
     expect(world.villages.filter((v) => v.floorY !== undefined)).toHaveLength(2);
+    expect(world.villages).toHaveLength(TOTAL_VILLAGES);
   });
   it("the rightmost tree is the dungeon entrance", () => {
     const { world } = generateWorld(1337);

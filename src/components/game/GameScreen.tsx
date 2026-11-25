@@ -3,6 +3,7 @@ import { Game, VIEW_H, type HudState, type Key } from "@/game/engine";
 import { playMusic, setMusicMuted, setMusicVolume } from "@/game/music";
 import { AUTOSAVE_SECONDS, SAVE_KEY, parseSave, type SaveData } from "@/game/save";
 import { initAudio, setMuted, setVolume, sfx } from "@/game/sfx";
+import { TOTAL_VILLAGES } from "@/game/world";
 import { PixelIcon } from "./PixelIcon";
 import { InventoryPanel } from "./Inventory";
 import { GameButton } from "./GameButton";
@@ -47,9 +48,11 @@ export function GameScreen() {
   const invOpenRef = useRef(false);
   const startedRef = useRef(false);
   const deadRef = useRef(false);
+  const sittingRef = useRef<HudState["sitting"]>(null);
   invOpenRef.current = invOpen;
   startedRef.current = started;
   deadRef.current = !!hud?.dead;
+  sittingRef.current = hud?.sitting ?? null;
 
   useEffect(() => {
     try { setSettings(parseSettings(localStorage.getItem(SETTINGS_STORAGE_KEY))); } catch { /* Browser storage may be unavailable. */ }
@@ -146,11 +149,21 @@ export function GameScreen() {
         e.preventDefault();
         game.clearKeys();
         if (invOpenRef.current) setInvOpen(false);
+        else if (sittingRef.current) game.standUp();
         else if (menuRef.current === "settings") setMenu(startedRef.current ? "pause" : "main");
         else if (startedRef.current) setMenu(menuRef.current === "pause" ? null : "pause");
         return;
       }
       if (menuRef.current !== null || deadRef.current) return;
+      if (sittingRef.current && e.key >= "1" && e.key <= "9") {
+        const dest = sittingRef.current.destinations[Number(e.key) - 1];
+        if (dest) {
+          e.preventDefault();
+          initAudio();
+          game.teleportToVillage(dest.name);
+          return;
+        }
+      }
       const action = actionForCode(settingsRef.current.keys, e.code);
       if (!action) return;
       e.preventDefault();
@@ -363,6 +376,38 @@ export function GameScreen() {
                 )
               )}
 
+              {hud.sitting && !hud.dead && !invOpen && menu === null && (
+                <div className="pixel-panel absolute left-1/2 top-1/2 w-[min(92%,380px)] -translate-x-1/2 -translate-y-1/2 px-5 py-4 text-center">
+                  <div className="font-display text-xs text-accent">Campfire travel · {hud.sitting.from}</div>
+                  <p className="mt-1 text-base text-muted-foreground">Choose a village log to teleport to:</p>
+                  <div className="mt-3 flex flex-col gap-2">
+                    {hud.sitting.destinations.map((dest, idx) => (
+                      <GameButton
+                        key={dest.name}
+                        onClick={() => {
+                          initAudio();
+                          gameRef.current?.teleportToVillage(dest.name);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-2 text-xs"
+                      >
+                        <span>
+                          {idx + 1}. {dest.name}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {dest.treetop ? "Treetop" : "Ground"}
+                        </span>
+                      </GameButton>
+                    ))}
+                  </div>
+                  <GameButton
+                    onClick={() => gameRef.current?.standUp()}
+                    className="mt-3 w-full px-3 py-2 text-xs"
+                  >
+                    Stand up (ESC)
+                  </GameButton>
+                </div>
+              )}
+
               {invOpen && !hud.dead && (
                 <InventoryPanel hud={hud} onRelease={releaseFish} onClose={() => setInvOpen(false)} />
               )}
@@ -398,7 +443,7 @@ export function GameScreen() {
                         Continue
                       </GameButton>
                       <div className="text-base leading-none text-muted-foreground">
-                        {savedGame.discovered.length}/7 villages · {savedGame.coins} coins
+                        {savedGame.discovered.length}/{TOTAL_VILLAGES} villages · {savedGame.coins} coins
                       </div>
                       <GameButton disabled={!ready} onClick={newGame} className="w-56 px-6 py-3 text-xs">
                         New game
