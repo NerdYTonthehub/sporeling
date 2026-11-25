@@ -11,10 +11,18 @@ describe("forest exploration", () => {
     expect(world.villages.filter((v) => v.floorY !== undefined)).toHaveLength(2);
     expect(world.villages).toHaveLength(TOTAL_VILLAGES);
   });
-  it("the rightmost tree is the dungeon entrance", () => {
-    const { world } = generateWorld(1337);
-    expect(world.elder.x).toBe(Math.max(...world.trees.map((t) => t.x)));
-    expect(world.elder.elder).toBe(true);
+  it("places the dungeon entrance randomly on any ground-level tree", () => {
+    const { world: wDefault } = generateWorld(1337);
+    expect(wDefault.trees).toContain(wDefault.elder);
+    expect(wDefault.elder.elder).toBe(true);
+    expect(wDefault.trees.filter((t) => t.elder)).toHaveLength(1);
+
+    const xs = [0, 3, Math.floor(wDefault.trees.length / 2), wDefault.trees.length - 1].map((idx) => {
+      const { world } = generateWorld(1337, idx);
+      expect(world.elder).toBe(world.trees[idx]);
+      return world.elder.x;
+    });
+    expect(new Set(xs).size).toBe(4);
   });
   it("rope bridges join every neighboring tree's decks", () => {
     const { world } = generateWorld(1337);

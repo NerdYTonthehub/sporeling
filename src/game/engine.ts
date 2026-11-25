@@ -2,19 +2,15 @@
 import { appleTreeGeom, drawAppleTree, drawBeetle, drawBeetleKing, drawFish, drawFlyer, drawHouse, drawLine, drawMushroomPerson, drawShellHouse, drawSnail, drawSword, fillCircle, rect } from "./sprites";
 import {
   FISH,
-  GODLY_PITY_LIMIT,
   MAX_HOLY_TRIES,
   addFish,
-  advanceFishingStreak,
   fishById,
-  isWithinPoolRadius,
   releaseReward,
   removeFish,
   resolveBite,
   rollFish,
   rollWait,
   type FishSpecies,
-  type FishingStreak,
   type Inventory,
 } from "./fishing";
 import { sfx } from "./sfx";
@@ -33,6 +29,7 @@ import {
   drawHeavenBack,
   drawHeavenEffects,
   drawHeavenFloor,
+  drawHeavenFrontClouds,
   nextGodAttack,
   stompHitsDashGod,
   type HeavenState,
@@ -237,7 +234,6 @@ export class Game {
   private holyTries = 0;
   private sacrificedFish: string[] = [];
   private releasingKind: "coin" | "heaven" = "coin";
-  private fishingStreak: FishingStreak | null = null;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F" };
 
   constructor(
@@ -251,8 +247,8 @@ export class Game {
   }
 
   // ---------- lifecycle ----------
-  reset() {
-    const { world, groundY } = generateWorld(1337);
+  reset(doorTreeIdx?: number) {
+    const { world, groundY } = generateWorld(1337, doorTreeIdx);
     this.world = world;
     const ground = new Int16Array(WORLD_W + 1);
     for (let x = 0; x <= WORLD_W; x++) ground[x] = groundY(x);
@@ -307,7 +303,6 @@ export class Game {
     this.holyTries = 0;
     this.sacrificedFish = [];
     this.releasingKind = "coin";
-    this.fishingStreak = null;
     this.camX = clamp(this.p.x - this.W / 2, 0, WORLD_W - this.W);
     this.camY = this.groundAt(this.p.x) + 38 - this.H;
     this.emitHud();
@@ -401,12 +396,13 @@ export class Game {
       godDefeated: this.godDefeated,
       holyTries: this.holyTries,
       sacrificedFish: this.sacrificedFish.slice(-60),
+      doorTreeIdx: Math.max(0, this.world.trees.indexOf(this.world.elder)),
     };
   }
 
   /** Start a fresh world and apply a save on top of it. */
   loadSave(s: SaveData) {
-    this.reset();
+    this.reset(s.doorTreeIdx);
     this.vitals = { health: s.health, hunger: s.hunger };
     this.coins = s.coins;
     this.inventory = { ...s.inventory };
@@ -756,9 +752,6 @@ export class Game {
     this.updateApples(dt);
     if (this.scene === "dungeon") this.updateDungeon(dt);
     if (this.scene === "heaven") this.updateHeaven(dt, active && this.mode !== "releasing" && !this.fade);
-    if (this.fishingStreak && (this.scene !== "forest" || !isWithinPoolRadius(this.fishingStreak, p.x, p.y))) {
-      this.fishingStreak = null;
-    }
     if (active && this.attackT > 0) this.resolveAttack();
     if (active && this.mode === "fishing") this.updateFishing(dt);
     if (active && this.mode === "releasing") this.updateRelease(dt);
@@ -786,7 +779,6 @@ export class Game {
   private enterHouse(v: Village, h: House) {
     sfx.door();
     this.transition(() => {
-      this.fishingStreak = null;
       this.returnPos = { x: this.p.x, y: this.p.y };
       this.room = createRoom(h, v.name, Math.round(h.x * 13 + v.x * 7));
       this.scene = "room";
@@ -1282,9 +1274,10 @@ export class Game {
 
   private updateShockwaves(dt: number, active: boolean) {
     const p = this.p;
+    const speed = this.scene === "heaven" ? 165 : 120;
     this.shockwaves = this.shockwaves.filter((w) => {
       w.t += dt;
-      w.x += w.dir * 120 * dt;
+      w.x += w.dir * speed * dt;
       const g = this.groundAt(w.x);
       if (active && p.invuln <= 0 && Math.abs(p.x - w.x) < 6 && p.y > g - 7) this.hurt(SHOCKWAVE_DAMAGE, w.x - w.dir * 10);
       return w.t < 1.8;
@@ -1366,9 +1359,7 @@ export class Game {
     else if (logSpot) this.prompt = `Sit (${A})`;
     else if (tree) this.prompt = `${A} · eat apple (${tree.apples.filter((a) => a.grown).length} left)`;
     else if (puddle) {
-      const streak = this.hasDoubleJump && this.fishingStreak?.puddleX === puddle.x ? this.fishingStreak.catches : 0;
-      const place = puddle === LAKE_FISHING_SPOT ? "Great Lake" : "puddle";
-      this.prompt = streak > 0 ? `${A} · fish in the ${place} (${streak}/${GODLY_PITY_LIMIT})` : `${A} · fish in the ${place}`;
+      this.prompt = puddle === LAKE_FISHING_SPOT ? `${A} · fish in the Great Lake` : `${A} · fish in the puddle`;
     } else if (this.nearFire) this.prompt = this.vitals.health < 100 ? "Resting by the fire…" : "A cosy campfire";
     else this.prompt = null;
 
@@ -1444,7 +1435,6 @@ export class Game {
       const p = this.p;
       this.mode = "walk";
       this.sittingVillage = null;
-      this.fishingStreak = null;
       this.talking = null;
       p.x = target.fireX - 16;
       p.y = this.villageFloor(target);
@@ -1541,9 +1531,7 @@ export class Game {
     }
     this.prompt = `${this.labels.jump}!`;
     if (res === "caught") {
-      const catchesAtPool = this.fishingStreak && this.fishingStreak.puddleX === f.puddle.x ? this.fishingStreak.catches : 0;
-      const fish = rollFish(Math.random(), this.hasDoubleJump, catchesAtPool);
-      this.fishingStreak = advanceFishingStreak(this.fishingStreak, { x: f.puddle.x, half: f.puddle.half, y: wy }, fish.id, this.hasDoubleJump);
+      const fish = rollFish(Math.random(), this.hasDoubleJump);
       this.inventory = addFish(this.inventory, fish.id);
       this.fishCaught++;
       sfx.caught();
@@ -1551,13 +1539,7 @@ export class Game {
         this.spawn({ x: f.bobX, y: wy, vx: (Math.random() - 0.5) * 50, vy: -40 - Math.random() * 50, life: 0.6, color: i % 2 ? "#cfe9f0" : "#6fa3b8", size: 1, grav: 260, kind: "spark" });
       }
       this.catchAnim = { fish, t: 0, x0: f.bobX, y0: wy };
-      const msg =
-        fish.id === "godly"
-          ? "You caught a Godly Goldfish!"
-          : this.fishingStreak && this.fishingStreak.catches > 0
-            ? `You caught a ${fish.name}! (${this.fishingStreak.catches}/${GODLY_PITY_LIMIT})`
-            : `You caught a ${fish.name}!`;
-      this.endFishing(msg);
+      this.endFishing(fish.id === "godly" ? "You caught a Godly Goldfish!" : `You caught a ${fish.name}!`);
     } else if (res === "missed") {
       sfx.splash();
       this.endFishing("It got away…");
@@ -1699,13 +1681,13 @@ export class Game {
     const g = h.god;
     if (g.hp <= 0 || g.hitT > 0) return;
     g.hp = Math.max(0, g.hp - amount);
-    g.hitT = 0.35;
+    g.hitT = 0.25;
     this.shakeT = 0.2;
     sfx.bossHit();
     this.bits(g.x, g.y - 24, 10, "#ffe46b", "#f4f2fb");
     if (g.hp <= 0) {
       g.phase = "defeated";
-      h.defeatTimer = 3.2;
+      h.defeatTimer = 2.4;
       h.bombs = [];
       g.beamActive = false;
       const outcome = applyHolyTryOutcome(this.inventory, this.holyTries, true);
@@ -1776,32 +1758,32 @@ export class Game {
     switch (g.phase) {
       case "arrive": {
         g.x = Math.round(h.w / 2);
-        g.y += (82 - g.y) * Math.min(1, dt * 2.5);
+        g.y += (82 - g.y) * Math.min(1, dt * 4);
         g.timer -= dt;
         if (g.timer <= 0) {
           g.phase = "hover";
-          g.timer = 0.9;
+          g.timer = 0.5;
           sfx.gate();
-          this.banner = { title: "Goldfish of Destruction", sub: "Also known as God", t: 3 };
+          this.banner = { title: "Goldfish of Destruction", sub: "Also known as God", t: 2.5 };
         }
         break;
       }
       case "hover": {
-        const tx = h.w / 2 + Math.sin(h.t * 1.4) * Math.min(50, h.w * 0.16);
-        const ty = 78 + Math.sin(h.t * 2.4) * 6;
-        g.x += (tx - g.x) * Math.min(1, dt * 3);
-        g.y += (ty - g.y) * Math.min(1, dt * 3);
+        const tx = h.w / 2 + Math.sin(h.t * 2.4) * Math.min(58, h.w * 0.2);
+        const ty = 78 + Math.sin(h.t * 3.6) * 7;
+        g.x += (tx - g.x) * Math.min(1, dt * 5.5);
+        g.y += (ty - g.y) * Math.min(1, dt * 5.5);
         g.timer -= dt;
         if (g.timer <= 0 && canFight) {
           const next = nextGodAttack(g.attackIdx++);
           g.phase = next;
           g.sub = "windup";
           if (next === "fish_bombs") {
-            g.timer = 0.55;
+            g.timer = 0.32;
             g.bombsLeft = 5;
             g.bombCd = 0;
           } else if (next === "hand_smash") {
-            g.timer = 0.7;
+            g.timer = 0.45;
             g.handSide = p.x >= g.x ? 1 : -1;
             g.handX = clamp(p.x, 38, h.w - 38);
             g.handY = 66;
@@ -1811,26 +1793,26 @@ export class Game {
             g.beamDir = g.attackIdx % 2 === 0 ? 1 : -1;
             g.beamX = g.beamDir > 0 ? bounds.minX : bounds.maxX;
             g.beamActive = true;
-            g.timer = 0.9;
+            g.timer = 0.55;
           } else if (next === "dash") {
             const startLeft = p.x > h.w / 2;
             g.dashDir = startLeft ? 1 : -1;
             g.x = startLeft ? 34 : h.w - 34;
             g.dashTargetX = startLeft ? h.w - 34 : 34;
             g.y = h.floorY;
-            g.timer = 0.65;
+            g.timer = 0.4;
           }
         }
         break;
       }
       case "fish_bombs": {
-        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 3);
-        g.y += (72 - g.y) * Math.min(1, dt * 3);
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 5);
+        g.y += (72 - g.y) * Math.min(1, dt * 5);
         if (g.sub === "windup") {
           g.timer -= dt;
           if (g.timer <= 0) {
             g.sub = "strike";
-            g.timer = 0.8;
+            g.timer = 0.45;
           }
         } else {
           g.bombCd -= dt;
@@ -1840,17 +1822,17 @@ export class Game {
             const dx = tx - g.x;
             const dy = h.floorY - 4 - (g.y - 22);
             const len = Math.hypot(dx, dy) || 1;
-            const spd = 140;
+            const spd = 195;
             h.bombs.push({ x: g.x, y: g.y - 22, vx: (dx / len) * spd, vy: (dy / len) * spd, t: 0, exploded: false });
             sfx.cast();
             g.bombsLeft--;
-            g.bombCd = 0.28;
+            g.bombCd = 0.18;
           }
           if (g.bombsLeft <= 0) {
             g.timer -= dt;
             if (g.timer <= 0) {
               g.phase = "hover";
-              g.timer = 1.0;
+              g.timer = 0.5;
             }
           }
         }
@@ -1859,43 +1841,43 @@ export class Game {
       case "hand_smash": {
         if (g.sub === "windup") {
           const target = clamp(p.x, 38, h.w - 38);
-          g.handX += (target - g.handX) * Math.min(1, dt * 5);
-          g.x += (g.handX - g.handSide * 22 - g.x) * Math.min(1, dt * 4);
-          g.y += (84 - g.y) * Math.min(1, dt * 4);
+          g.handX += (target - g.handX) * Math.min(1, dt * 8);
+          g.x += (g.handX - g.handSide * 22 - g.x) * Math.min(1, dt * 6.5);
+          g.y += (84 - g.y) * Math.min(1, dt * 6);
           g.handY = g.y - 20;
           g.timer -= dt;
           if (g.timer <= 0) g.sub = "strike";
         } else if (g.sub === "strike") {
-          g.handY += 440 * dt;
+          g.handY += 640 * dt;
           if (g.handY >= h.floorY - 9) {
             g.handY = h.floorY - 9;
             if (!g.smashHit) {
               g.smashHit = true;
-              this.shakeT = 0.45;
+              this.shakeT = 0.4;
               sfx.gate();
-              this.dust(g.handX - 10, h.floorY, 6);
-              this.dust(g.handX + 10, h.floorY, 6);
+              this.dust(g.handX - 10, h.floorY, 7);
+              this.dust(g.handX + 10, h.floorY, 7);
               this.shockwaves.push({ x: g.handX - 16, dir: -1, t: 0 }, { x: g.handX + 16, dir: 1, t: 0 });
               if (canFight && p.invuln <= 0 && Math.abs(p.x - g.handX) < 17 && p.y > h.floorY - 18) {
                 this.hurt(GOD_SMASH_DAMAGE, g.handX);
               }
             }
             g.sub = "recover";
-            g.timer = 0.55;
+            g.timer = 0.35;
           }
         } else {
-          g.handY += (g.y - 20 - g.handY) * Math.min(1, dt * 6);
+          g.handY += (g.y - 20 - g.handY) * Math.min(1, dt * 9);
           g.timer -= dt;
           if (g.timer <= 0) {
             g.phase = "hover";
-            g.timer = 0.9;
+            g.timer = 0.45;
           }
         }
         break;
       }
       case "light_beam": {
-        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 4);
-        g.y += (66 - g.y) * Math.min(1, dt * 4);
+        g.x += (h.w / 2 - g.x) * Math.min(1, dt * 6);
+        g.y += (66 - g.y) * Math.min(1, dt * 6);
         if (g.sub === "windup") {
           g.timer -= dt;
           if (g.timer <= 0) {
@@ -1904,14 +1886,14 @@ export class Game {
           }
         } else {
           const bounds = beamBounds(h.w);
-          g.beamX += g.beamDir * 140 * dt;
+          g.beamX += g.beamDir * 215 * dt;
           if (canFight && p.invuln <= 0 && beamHitsPlayer(g.beamX, p.x)) {
             this.hurt(GOD_BEAM_DAMAGE, g.beamX);
           }
           if ((g.beamDir > 0 && g.beamX >= bounds.maxX) || (g.beamDir < 0 && g.beamX <= bounds.minX)) {
             g.beamActive = false;
             g.phase = "hover";
-            g.timer = 1.0;
+            g.timer = 0.5;
           }
         }
         break;
@@ -1925,7 +1907,7 @@ export class Game {
             sfx.swing();
           }
         } else if (g.sub === "strike") {
-          g.x += g.dashDir * 205 * dt;
+          g.x += g.dashDir * 285 * dt;
           if (canFight) {
             if (stompHitsDashGod(g, p.x, p.y, p.vy)) {
               this.damageGod(1);
@@ -1940,14 +1922,14 @@ export class Game {
           if ((g.dashDir > 0 && g.x >= g.dashTargetX) || (g.dashDir < 0 && g.x <= g.dashTargetX)) {
             g.x = g.dashTargetX;
             g.sub = "recover";
-            g.timer = 0.45;
+            g.timer = 0.3;
           }
         } else {
-          g.y += (82 - g.y) * Math.min(1, dt * 5);
+          g.y += (82 - g.y) * Math.min(1, dt * 7);
           g.timer -= dt;
           if (g.timer <= 0) {
             g.phase = "hover";
-            g.timer = 1.0;
+            g.timer = 0.5;
           }
         }
         break;
@@ -1974,6 +1956,7 @@ export class Game {
         blink: this.dead || p.blinkT < 0,
       });
     }
+    drawHeavenFrontClouds(ctx, h, this.W);
     this.drawAttack(0, 0);
     this.drawParticles(0, 0, false);
     this.drawParticles(0, 0, true);
@@ -1986,7 +1969,8 @@ export class Game {
 
   private dust(x: number, y: number, n: number) {
     for (let i = 0; i < n; i++) {
-      this.spawn({ x: x + (Math.random() - 0.5) * 6, y: y - 1, vx: (Math.random() - 0.5) * 40, vy: -Math.random() * 15, life: 0.4, color: "#c9b48a", size: 1, grav: 20, kind: "dust" });
+      const color = this.scene === "heaven" ? (i % 2 ? "#ffffff" : "#d8eeff") : "#c9b48a";
+      this.spawn({ x: x + (Math.random() - 0.5) * 6, y: y - 1, vx: (Math.random() - 0.5) * 40, vy: -Math.random() * 15, life: 0.4, color, size: 1, grav: 20, kind: "dust" });
     }
   }
 
