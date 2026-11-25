@@ -379,26 +379,34 @@ export function GameScreen() {
               {hud.sitting && !hud.dead && !invOpen && menu === null && (
                 <div className="pixel-panel absolute left-1/2 top-1/2 w-[min(92%,380px)] -translate-x-1/2 -translate-y-1/2 px-5 py-4 text-center">
                   <div className="font-display text-xs text-accent">Campfire travel · {hud.sitting.from}</div>
-                  <p className="mt-1 text-base text-muted-foreground">Choose a village log to teleport to:</p>
-                  <div className="mt-3 flex flex-col gap-2">
-                    {hud.sitting.destinations.map((dest, idx) => (
-                      <GameButton
-                        key={dest.name}
-                        onClick={() => {
-                          initAudio();
-                          gameRef.current?.teleportToVillage(dest.name);
-                        }}
-                        className="flex w-full items-center justify-between px-3 py-2 text-xs"
-                      >
-                        <span>
-                          {idx + 1}. {dest.name}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {dest.treetop ? "Treetop" : "Ground"}
-                        </span>
-                      </GameButton>
-                    ))}
-                  </div>
+                  {hud.sitting.destinations.length > 0 ? (
+                    <>
+                      <p className="mt-1 text-base text-muted-foreground">Choose a discovered village log:</p>
+                      <div className="mt-3 flex flex-col gap-2">
+                        {hud.sitting.destinations.map((dest, idx) => (
+                          <GameButton
+                            key={dest.name}
+                            onClick={() => {
+                              initAudio();
+                              gameRef.current?.teleportToVillage(dest.name);
+                            }}
+                            className="flex w-full items-center justify-between px-3 py-2 text-xs"
+                          >
+                            <span>
+                              {idx + 1}. {dest.name}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {dest.treetop ? "Treetop" : "Ground"}
+                            </span>
+                          </GameButton>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-base text-muted-foreground">
+                      You haven&apos;t discovered any other villages yet. Explore the forest to unlock campfire travel!
+                    </p>
+                  )}
                   <GameButton
                     onClick={() => gameRef.current?.standUp()}
                     className="mt-3 w-full px-3 py-2 text-xs"
