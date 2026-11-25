@@ -1,6 +1,7 @@
 import { FISH_H, FISH_W, fishById, fishPixels, releaseReward } from "@/game/fishing";
 import type { HudState } from "@/game/engine";
 import { GameButton } from "./GameButton";
+import { PixelIcon } from "./PixelIcon";
 
 export function FishIcon({ id, size = 40 }: { id: string; size?: number }) {
   const sp = fishById(id);
@@ -59,7 +60,9 @@ export function InventoryPanel({
                   <FishIcon id={item.id} size={30} />
                 </span>
                 <span className="text-center text-base leading-none text-foreground">{item.name}</span>
-                <span className="text-sm text-accent">+{releaseReward(item.id)} ◉</span>
+                <span className="flex items-center gap-1 text-sm text-accent">
+                  +{releaseReward(item.id)} <PixelIcon name="coin" size={12} />
+                </span>
                 {item.count > 1 && (
                   <span className="absolute right-1 top-0 font-display text-[9px] text-accent">×{item.count}</span>
                 )}

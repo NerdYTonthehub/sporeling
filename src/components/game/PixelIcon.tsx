@@ -38,6 +38,32 @@ const ICONS: Record<string, { grid: string[]; colors: Record<string, string> }> 
     ],
     colors: { K: "#1b140f", R: "#d9443a", W: "#f8f2e4", C: "#f1e4c8" },
   },
+  coin: {
+    grid: [
+      "..KKKK..",
+      ".KLLGGK.",
+      "KLLGSGGK",
+      "KLGGSGGK",
+      "KGGGGGGK",
+      "KGGDDGGK",
+      ".KDDDDK.",
+      "..KKKK..",
+    ],
+    colors: { K: "#1b140f", L: "#fff3a0", G: "#f2c84b", S: "#d49b27", D: "#a87018" },
+  },
+  bag: {
+    grid: [
+      "..KKKK..",
+      ".KBBBBK.",
+      "..KKKK..",
+      ".KBLLBK.",
+      "KBBBBBBK",
+      "KBBBBBKK",
+      "KBBBBBBK",
+      ".KKKKKK.",
+    ],
+    colors: { K: "#1b140f", B: "#8a6342", L: "#c49a6c" },
+  },
 };
 
 export function PixelIcon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {

@@ -1657,13 +1657,21 @@ export class Game {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
+    const height = Math.max(0, this.groundAt(this.p.x) - this.p.y);
+    const fgAlpha = clamp(1 - (height - 60) / 80, 0, 1);
+    const canopyAlpha = clamp(1 - (height - 140) / 140, 0.15, 1);
+
     this.drawTrunkLayer(cx, cy, 0.12, 70, 22, 46, "#7aa58e", "#6d9883", "#6f9a82", 1, 34);
     this.drawShafts(cx, day);
     this.drawTrunkLayer(cx, cy, 0.3, 140, 44, 80, "#507c69", "#456f5d", "#4a7662", 2, 20);
+    ctx.globalAlpha = canopyAlpha;
     this.drawCanopy(cx, cy, 0.3, "#163126", 2);
+    ctx.globalAlpha = 1;
     this.drawTrunkLayer(cx, cy, 0.55, 240, 70, 120, "#33554a", "#2a483e", "#2f5240", 3, 9);
     this.drawBushes(cx, cy, 0.75);
+    ctx.globalAlpha = canopyAlpha;
     this.drawCanopy(cx, cy, 0.6, "#0e2018", 3);
+    ctx.globalAlpha = 1;
 
     // play layer
     for (const t of this.world.trees) this.drawGiantTree(t, cx, cy);
@@ -1682,17 +1690,31 @@ export class Game {
       for (const n of v.npcs) {
         const sx = Math.round(n.x - cx);
         if (sx < -20 || sx > W + 20) continue;
-        drawMushroomPerson(ctx, sx, n.y - cy, {
-          facing: n.facing,
-          walk: n.walkT,
-          moving: n.vx !== 0,
-          air: false,
-          cap: n.cap,
-          spots: n.spots,
-          scale: n.scale,
-          blink: (this.time + n.x * 0.37) % 4 < 0.13,
-        });
-        if (n === this.nearNpc && this.talking?.npc !== n && !this.dead) this.drawBubble(sx, n.y - cy - Math.round(18 * n.scale) - 6);
+        const blink = (this.time + n.x * 0.37) % 4 < 0.13;
+        if (n.snail) {
+          drawSnail(ctx, sx, n.y - cy, {
+            facing: n.facing,
+            shell: n.cap,
+            scale: n.scale,
+            t: this.time,
+            moving: n.vx !== 0,
+            blink,
+          });
+        } else {
+          drawMushroomPerson(ctx, sx, n.y - cy, {
+            facing: n.facing,
+            walk: n.walkT,
+            moving: n.vx !== 0,
+            air: false,
+            cap: n.cap,
+            spots: n.spots,
+            scale: n.scale,
+            blink,
+          });
+        }
+        if (n === this.nearNpc && this.talking?.npc !== n && !this.dead) {
+          this.drawBubble(sx, n.y - cy - Math.round((n.snail ? 21 : 18) * n.scale) - 6);
+        }
       }
     }
 
@@ -1722,8 +1744,12 @@ export class Game {
     this.drawAttack(cx, cy);
 
     this.drawParticles(cx, cy, false);
-    this.drawFgGrass(cx, cy);
-    this.drawFgLeaves(cx, cy);
+    if (fgAlpha > 0.01) {
+      ctx.globalAlpha = fgAlpha;
+      this.drawFgGrass(cx, cy);
+      this.drawFgLeaves(cx, cy);
+      ctx.globalAlpha = 1;
+    }
 
     // night
     if (night > 0.01) {
@@ -1935,6 +1961,24 @@ export class Game {
       }
       return;
     }
+    if (pl.kind === "pier") {
+      // wooden pilings reaching down into the lake
+      for (let ox = 6; ox < pl.w - 4; ox += 22) {
+        rect(ctx, "#2a1d14", sx + ox - 1, sy + 3, 4, 24);
+        rect(ctx, "#5a3c26", sx + ox, sy + 3, 2, 24);
+      }
+      // bollard at the water end of the pier
+      rect(ctx, "#2a1d14", sx + 1, sy - 8, 5, 9);
+      rect(ctx, "#7a5536", sx + 2, sy - 7, 3, 8);
+      rect(ctx, "#b38a54", sx + 2, sy - 7, 2, 1);
+      // planked deck
+      rect(ctx, "#3a281c", sx - 1, sy, pl.w + 2, 4);
+      for (let ox = 0; ox < pl.w; ox++) {
+        if (ox % 5 !== 4) rect(ctx, "#b38a54", sx + ox, sy, 1, 2);
+        else rect(ctx, "#6b4a30", sx + ox, sy, 1, 2);
+      }
+      return;
+    }
     const [base, dark, light] = (FUNGUS[pl.color] ?? FUNGUS[0]) as [string, string, string];
     rect(ctx, "#1b140f", sx - 1, sy - 1, pl.w + 2, 3);
     rect(ctx, "#1b140f", sx, sy + 2, pl.w, 2);
@@ -1952,25 +1996,38 @@ export class Game {
     const H = this.H;
     const ys: number[] = new Array<number>(W);
     for (let x = 0; x < W; x++) ys[x] = this.groundAt(cx + x) - cy;
-    ctx.fillStyle = "#3a2a1f";
-    for (let x = 0; x < W; x++) if (ys[x]! < H) ctx.fillRect(x, ys[x]!, 1, H - ys[x]!);
-    ctx.fillStyle = "#2b1f17";
-    for (let x = 0; x < W; x++) if (ys[x]! + 14 < H) ctx.fillRect(x, ys[x]! + 14, 1, H - ys[x]! - 14);
-    ctx.fillStyle = "#3d6e2e";
-    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x]! + 2, 1, 2 + (hash1(cx + x, 5) < 0.3 ? 1 : 0));
-    ctx.fillStyle = "#5c9a3c";
-    for (let x = 0; x < W; x++) ctx.fillRect(x, ys[x]!, 1, 2);
-    ctx.fillStyle = "#86c452";
-    for (let x = 0; x < W; x++) if (hash1(cx + x, 6) < 0.45) ctx.fillRect(x, ys[x]!, 1, 1);
-    ctx.fillStyle = "#4d3828";
+    const tick = Math.floor(this.time * 2.5);
     for (let x = 0; x < W; x++) {
-      const h = hash1(cx + x, 7);
-      if (h < 0.12) ctx.fillRect(x, ys[x]! + 6 + Math.floor(h * 100) % 18, 1, 1);
-    }
-    ctx.fillStyle = "#1f1610";
-    for (let x = 0; x < W; x++) {
-      const h = hash1(cx + x, 8);
-      if (h < 0.05) ctx.fillRect(x, ys[x]! + 9 + Math.floor(h * 400) % 20, 2, 1);
+      const wx = cx + x;
+      const y = ys[x]!;
+      if (y >= H) continue;
+      if (wx < LAKE_EDGE) {
+        // Great Lake water
+        rect(ctx, "#234a60", x, y, 1, H - y);
+        if (y + 5 < H) rect(ctx, "#183749", x, y + 5, 1, H - y - 5);
+        if (y + 14 < H) rect(ctx, "#102635", x, y + 14, 1, H - y - 14);
+        rect(ctx, "#4f86a0", x, y, 1, 2);
+        if (hash1(wx * 3, tick) < 0.09) rect(ctx, "#cfe9f0", x, y, 1, 1);
+        else if (hash1(wx * 5, tick + 7) < 0.06) rect(ctx, "#6fa3b8", x, y + 3 + (wx % 5), 2, 1);
+        continue;
+      }
+      // Dirt & deep soil
+      rect(ctx, "#3a2a1f", x, y, 1, H - y);
+      if (y + 14 < H) rect(ctx, "#2b1f17", x, y + 14, 1, H - y - 14);
+      if (wx < LAKE_EDGE + 26) {
+        // Sandy shore rising out of the Great Lake
+        rect(ctx, "#9e8658", x, y + 2, 1, 3);
+        rect(ctx, "#cbb483", x, y, 1, 2);
+        if (hash1(wx, 6) < 0.35) rect(ctx, "#e3d1a2", x, y, 1, 1);
+      } else {
+        rect(ctx, "#3d6e2e", x, y + 2, 1, 2 + (hash1(wx, 5) < 0.3 ? 1 : 0));
+        rect(ctx, "#5c9a3c", x, y, 1, 2);
+        if (hash1(wx, 6) < 0.45) rect(ctx, "#86c452", x, y, 1, 1);
+      }
+      const h7 = hash1(wx, 7);
+      if (h7 < 0.12) rect(ctx, "#4d3828", x, y + 6 + (Math.floor(h7 * 100) % 18), 1, 1);
+      const h8 = hash1(wx, 8);
+      if (h8 < 0.05) rect(ctx, "#1f1610", x, y + 9 + (Math.floor(h8 * 400) % 20), 2, 1);
     }
   }
 
@@ -2057,7 +2114,8 @@ export class Game {
     }
     for (const h of v.houses) {
       const sx = Math.round(h.x - cx);
-      drawHouse(ctx, h, sx, gy, night);
+      if (h.shell) drawShellHouse(ctx, h, sx, gy, night);
+      else drawHouse(ctx, h, sx, gy, night);
     }
     // bunting between lanterns
     const pairs: [number, number][] = [
@@ -2324,7 +2382,14 @@ export class Game {
       const flick = 0.85 + Math.sin(this.time * 13) * 0.08 + Math.sin(this.time * 7.3) * 0.07;
       glow(v.fireX - cx, gy - 6, 50, "255,150,60", (0.18 + night * 0.4) * flick);
       for (const lx of v.lanterns) glow(lx - cx, gy - 27, 26, "255,200,100", night * 0.45);
-      for (const h of v.houses) if (h.stemH > 22) glow(h.x - h.stemW / 2 + 4 - cx, gy - h.stemH + 6, 10, "255,210,110", night * 0.5);
+      for (const h of v.houses) {
+        if (h.shell) {
+          const r = Math.round(h.capW / 2) + 4;
+          glow(h.x + Math.round(r * 0.6) - cx, gy - Math.round(r * 1.3) + 2, 10, "255,210,110", night * 0.5);
+        } else if (h.stemH > 22) {
+          glow(h.x - h.stemW / 2 + 4 - cx, gy - h.stemH + 6, 10, "255,210,110", night * 0.5);
+        }
+      }
     }
     if (night > 0.05) {
       for (const d of this.world.decor) {
