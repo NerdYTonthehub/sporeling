@@ -21,6 +21,7 @@ const sample: SaveData = {
   godDefeated: false,
   holyTries: 1,
   sacrificedFish: ["minnow", "carp"],
+  sporeSpring: false,
 };
 
 describe("save games", () => {

@@ -1,6 +1,6 @@
 // Player settings: sound + key bindings. Pure helpers; persisted to localStorage by the UI.
 
-export type Action = "left" | "right" | "up" | "down" | "jump" | "act" | "attack" | "bag";
+export type Action = "left" | "right" | "up" | "down" | "jump" | "act" | "attack" | "bag" | "dash";
 
 export const ACTIONS: { id: Action; label: string }[] = [
   { id: "left", label: "Walk left" },
@@ -10,6 +10,7 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "jump", label: "Jump · reel in a fish" },
   { id: "act", label: "Use · eat, talk, fish, enter" },
   { id: "attack", label: "Attack · swing wooden sword" },
+  { id: "dash", label: "Dash · Spore Spring" },
   { id: "bag", label: "Open fish bag" },
 ];
 
@@ -23,6 +24,7 @@ export const DEFAULT_KEYS: KeyBinds = {
   jump: ["Space", null],
   act: ["KeyE", "Enter"],
   attack: ["KeyF", "KeyJ"],
+  dash: ["ShiftLeft", "KeyC"],
   bag: ["KeyI", "Tab"],
 };
 

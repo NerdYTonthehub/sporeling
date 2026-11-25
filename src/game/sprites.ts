@@ -1040,28 +1040,89 @@ export function drawBoat(ctx: Ctx, x: number, wy: number, t: number, dir = -1) {
   rect(ctx, "#6fa3b8", x + 2 - rip, wy + 3, 9, 1);
 }
 
-/** Earthy cone-shaped anthill mound on the far shore. (x, gy) = ground center. */
+/** Detailed earthy anthill mound on the far shore with flared base, craters, and arched tunnels. (x, gy) = ground center. */
 export function drawAnthill(ctx: Ctx, x: number, gy: number, w: number, h: number) {
   const half = Math.round(w / 2);
   for (let row = 0; row < h; row++) {
     const k = row / h;
-    const rw = Math.max(4, Math.round(w * (1 - k * 0.78)));
+    // Gently flared bottom & organic curved mound silhouette
+    const curve = Math.pow(1 - k, 0.72);
+    const flare = k < 0.22 ? Math.round((0.22 - k) * 14) : 0;
+    const rw = Math.max(6, Math.round(w * curve) + flare);
     const rx = x - Math.round(rw / 2);
     const ry = gy - row - 1;
     rect(ctx, "#1b140f", rx - 1, ry, rw + 2, 1);
-    const col = k > 0.65 ? "#8b6440" : k > 0.3 ? "#6b4b2e" : "#4f3620";
+    const col = k > 0.7 ? "#966d46" : k > 0.42 ? "#7a5534" : k > 0.18 ? "#614225" : "#4a311a";
     rect(ctx, col, rx, ry, rw, 1);
-    rect(ctx, "#3d2917", rx + rw - Math.max(2, Math.round(rw * 0.25)), ry, Math.max(2, Math.round(rw * 0.25)), 1);
+    // Sunlit warm left ridge + deep right flank shading
+    rect(ctx, "#ad8256", rx, ry, Math.max(2, Math.round(rw * 0.18)), 1);
+    const shW = Math.max(2, Math.round(rw * 0.26));
+    rect(ctx, "#342112", rx + rw - shW, ry, shW, 1);
   }
-  // Entrance tunnel hole at top & base
-  rect(ctx, "#1b140f", x - 2, gy - h, 4, 2);
-  rect(ctx, "#0e0a07", x - 1, gy - h, 2, 2);
-  rect(ctx, "#1b140f", x - Math.round(half * 0.35), gy - 5, 5, 5);
-  rect(ctx, "#0e0a07", x - Math.round(half * 0.35) + 1, gy - 4, 3, 4);
-  // Pine-needle / dirt speckles
-  rect(ctx, "#a88254", x - Math.round(half * 0.4), gy - Math.round(h * 0.45), 2, 1);
-  rect(ctx, "#a88254", x + Math.round(half * 0.25), gy - Math.round(h * 0.65), 2, 1);
-  rect(ctx, "#332214", x + 2, gy - Math.round(h * 0.28), 2, 1);
+  // Rim pebbles & settled roots at the base
+  rect(ctx, "#3d2917", x - half - 3, gy - 2, 4, 2);
+  rect(ctx, "#8b6440", x + half - 1, gy - 2, 3, 2);
+
+  // Crater top opening
+  rect(ctx, "#1b140f", x - 4, gy - h - 1, 8, 3);
+  rect(ctx, "#6b4b2e", x - 3, gy - h - 1, 6, 1);
+  rect(ctx, "#0e0a07", x - 2, gy - h, 4, 2);
+
+  // Arched lower tunnel entrance + secondary side tunnel
+  const tx = x - Math.round(half * 0.22);
+  rect(ctx, "#1b140f", tx - 4, gy - 7, 8, 7);
+  rect(ctx, "#0e0a07", tx - 3, gy - 6, 6, 6);
+  rect(ctx, "#080604", tx - 2, gy - 7, 4, 2);
+  rect(ctx, "#3a2515", tx - 5, gy - 2, 2, 2);
+
+  const sx = x + Math.round(half * 0.34);
+  if (w >= 34) {
+    rect(ctx, "#1b140f", sx - 2, gy - Math.round(h * 0.48), 5, 4);
+    rect(ctx, "#0e0a07", sx - 1, gy - Math.round(h * 0.48) + 1, 3, 3);
+  }
+
+  // Pine-needle thatch and soil speckles
+  rect(ctx, "#b8905d", x - Math.round(half * 0.45), gy - Math.round(h * 0.36), 3, 1);
+  rect(ctx, "#b8905d", x + Math.round(half * 0.12), gy - Math.round(h * 0.68), 3, 1);
+  rect(ctx, "#c9a36f", x - 2, gy - Math.round(h * 0.56), 2, 1);
+  rect(ctx, "#2e1d10", x + 3, gy - Math.round(h * 0.26), 3, 1);
+}
+
+/** Background half of a fallen dead tree trunk so you can walk over OR through its hollowed arch. */
+export function drawFallenTreeBack(ctx: Ctx, x: number, gy: number, w: number, h: number, flip = false) {
+  const lx = x - Math.round(w / 2);
+  const ty = gy - h;
+  // Main fallen trunk silhouette & bark grain
+  rect(ctx, OUTLINE, lx - 1, ty - 1, w + 2, h + 1);
+  rect(ctx, "#523a26", lx, ty, w, h);
+  rect(ctx, "#735438", lx, ty, w, 3);
+  rect(ctx, "#8c6947", lx + 2, ty + 1, w - 4, 1);
+  rect(ctx, "#3a2717", lx, gy - 4, w, 4);
+  for (let bx = 4; bx < w - 4; bx += 7) {
+    rect(ctx, "#3f2b19", lx + bx, ty + 4 + ((bx * 3) % 4), 4, 1);
+    rect(ctx, "#664a30", lx + bx + 2, ty + 6 + ((bx * 5) % Math.max(2, h - 8)), 3, 1);
+  }
+  // Uprooted side roots & snapped upper stub
+  const rx = flip ? lx + w - 8 : lx;
+  rect(ctx, OUTLINE, rx - 3, ty - 6, 9, h + 6);
+  rect(ctx, "#4a3320", rx - 2, ty - 5, 7, h + 5);
+  rect(ctx, "#6e4e32", rx - 1, ty - 4, 2, h + 2);
+  // Hollow tunnel interior backdrop so player visibly passes inside when walking through
+  const archW = Math.min(28, Math.round(w * 0.36));
+  const ax = x - Math.round(archW / 2);
+  rect(ctx, "#140d08", ax, gy - h + 4, archW, h - 4);
+  rect(ctx, "#24180f", ax + 2, gy - h + 5, archW - 4, 2);
+}
+
+/** Foreground arch lip & root framing on a fallen dead tree when walking through it. */
+export function drawFallenTreeFront(ctx: Ctx, x: number, gy: number, w: number, h: number) {
+  const archW = Math.min(28, Math.round(w * 0.36));
+  const ax = x - Math.round(archW / 2);
+  // Top arch bark bridge over the hollow passage (player walks behind this top beam at ground level)
+  rect(ctx, OUTLINE, ax - 2, gy - h - 1, archW + 4, 5);
+  rect(ctx, "#735438", ax - 1, gy - h, archW + 2, 3);
+  rect(ctx, "#8c6947", ax, gy - h + 1, archW, 1);
+  rect(ctx, "#3a2717", ax - 1, gy - h + 3, archW + 2, 1);
 }
 
 /** Scuttling worker or soldier ant. (x, y) = feet center. */
@@ -1100,4 +1161,56 @@ export function drawAnt(ctx: Ctx, x: number, y: number, facing: number, t: numbe
   rect(ctx, OUTLINE, Math.round(x + f * (5 * s)), y - 6, 1, 2);
   rect(ctx, OUTLINE, Math.round(x + f * (6 * s)), y - 7, 1, 1);
   if (soldier) rect(ctx, "#e9dcc4", Math.round(x + f * 6), y - 3, 2, 1);
+}
+
+/** Big plump queen/honey-pot ant at the far left of the ant lands who grants Spore Spring. */
+export function drawBigAnt(ctx: Ctx, x: number, y: number, facing: number, t: number, blink = false) {
+  const f = facing >= 0 ? 1 : -1;
+  const breathe = Math.round(Math.sin(t * 2.5));
+
+  // Stout legs gripping the dry earth
+  for (const lx of [-10, -3, 4, 9]) {
+    rect(ctx, OUTLINE, x + lx - 1, y - 5, 3, 5);
+    rect(ctx, "#4a2018", x + lx, y - 4, 1, 4);
+  }
+
+  // Giant plump golden-banded abdomen (honey-pot belly)
+  const bellyX = x - f * 8;
+  const bellyY = y - 12 + breathe;
+  ctx.fillStyle = OUTLINE;
+  fillCircle(ctx, bellyX, bellyY, 10);
+  rect(ctx, OUTLINE, bellyX - 11, bellyY - 6, 22, 12);
+  ctx.fillStyle = "#8a2a1b";
+  fillCircle(ctx, bellyX, bellyY, 9);
+  rect(ctx, "#b84528", bellyX - 9, bellyY - 5, 18, 9);
+  // Warm golden honey stripes on swollen abdomen
+  rect(ctx, "#f2b84b", bellyX - 7, bellyY - 4, 14, 2);
+  rect(ctx, "#ffd97d", bellyX - 5, bellyY - 4, 8, 1);
+  rect(ctx, "#f2b84b", bellyX - 8, bellyY + 1, 16, 2);
+  rect(ctx, "#5c1a12", bellyX - 6, bellyY + 5, 12, 3);
+
+  // Chubby thorax & collar
+  const thX = x + f * 3 - 3;
+  rect(ctx, OUTLINE, thX - 1, y - 11, 8, 7);
+  rect(ctx, "#6b2218", thX, y - 10, 6, 5);
+  rect(ctx, "#a33c2a", thX + 1, y - 10, 4, 2);
+
+  // Friendly round head + crown-like spore antennae
+  const hx = x + f * 9 - 4;
+  const hy = y - 15;
+  rect(ctx, OUTLINE, hx - 1, hy - 1, 10, 9);
+  rect(ctx, "#7c2518", hx, hy, 8, 7);
+  rect(ctx, "#b84528", hx + 1, hy, 6, 3);
+  // Friendly eyes
+  const ex = hx + (f > 0 ? 5 : 1);
+  if (blink) {
+    rect(ctx, OUTLINE, ex, hy + 3, 2, 1);
+  } else {
+    rect(ctx, "#fff3a0", ex, hy + 2, 2, 2);
+    rect(ctx, OUTLINE, ex + (f > 0 ? 1 : 0), hy + 3, 1, 1);
+  }
+  // Golden spore-tipped antennae
+  rect(ctx, OUTLINE, x + f * 11, hy - 4, 1, 4);
+  rect(ctx, OUTLINE, x + f * 12, hy - 5, 2, 2);
+  rect(ctx, "#ffe46b", x + f * 12, hy - 5, 1, 1);
 }

@@ -39,7 +39,7 @@ export interface Platform {
   w: number;
   color: number; // index into fungus palette
   /** shelf = fungus ledge, deck = wooden tree-top deck, bridge = sagging rope bridge from (x,y) to (x+w,y2) */
-  kind?: "shelf" | "deck" | "bridge" | "pier" | "stone";
+  kind?: "shelf" | "deck" | "bridge" | "pier" | "stone" | "fallenlog";
   y2?: number;
   sag?: number;
 }
@@ -582,11 +582,22 @@ export interface DeadDecor {
   c: number;
 }
 
+export const FAT_ANT_X = 90;
+
+export interface FallenTree {
+  x: number;
+  w: number;
+  h: number;
+  flip: boolean;
+}
+
 export interface AntShore {
   w: number;
   lakeEdge: number;
+  fatAntX: number;
   pier: Platform;
   platforms: Platform[];
+  fallenTrees: FallenTree[];
   groundY: (x: number) => number;
   ground: Int16Array;
   anthills: Anthill[];
@@ -607,15 +618,29 @@ export function generateAntShore(seed = 1337): AntShore {
     GROUND_BASE - 2 + Math.sin(x / f1 + p1) * 8 + Math.cos(x / f2 + p2) * 5;
 
   const anthills: Anthill[] = [];
-  let hx = 140;
+  let hx = 260;
   while (hx < ANTSHORE_LAKE_EDGE - 220) {
-    const w = Math.round(rr(30, 48));
-    const h = Math.round(rr(16, 26));
+    const w = Math.round(rr(34, 54));
+    const h = Math.round(rr(18, 28));
     anthills.push({ x: Math.round(hx), w, h });
-    hx += rr(175, 250);
+    hx += rr(190, 260);
   }
 
   const nearHill = (x: number, pad = 6) => anthills.some((ah) => Math.abs(x - ah.x) < ah.w / 2 + pad);
+
+  // Place 4-5 fallen trees along the dry plains, avoiding hills and the fat ant sanctuary
+  const fallenTrees: FallenTree[] = [];
+  for (let fx = 215; fx < ANTSHORE_LAKE_EDGE - 160; fx += rr(195, 270)) {
+    const w = Math.round(rr(66, 88));
+    const h = Math.round(rr(15, 19));
+    let x = Math.round(fx);
+    if (nearHill(x, w / 2 + 12)) {
+      const shifted = Math.round(fx + 62);
+      if (shifted < ANTSHORE_LAKE_EDGE - 150 && !nearHill(shifted, w / 2 + 8)) x = shifted;
+      else continue;
+    }
+    fallenTrees.push({ x, w, h, flip: rnd() < 0.5 });
+  }
 
   const groundY = (x: number) => {
     if (x > ANTSHORE_LAKE_EDGE) return LAKE_Y;
@@ -624,6 +649,15 @@ export function generateAntShore(seed = 1337): AntShore {
       const t = (ANTSHORE_LAKE_EDGE - x) / 70;
       const sm = t * t * (3 - 2 * t);
       g = LAKE_Y * (1 - sm) + g * sm;
+    }
+    // Flat calm glade around the far-left Plump Queen ant
+    const fd = Math.abs(x - FAT_ANT_X);
+    if (fd <= 55) {
+      const flatY = rawDryGround(FAT_ANT_X);
+      if (fd < 40) return Math.round(flatY);
+      const t = (fd - 40) / 15;
+      const sm = t * t * (3 - 2 * t);
+      g = flatY * (1 - sm) + g * sm;
     }
     for (const ah of anthills) {
       const half = ah.w / 2;
@@ -635,19 +669,29 @@ export function generateAntShore(seed = 1337): AntShore {
       const sm = t * t * (3 - 2 * t);
       g = flatY * (1 - sm) + g * sm;
     }
+    for (const ft of fallenTrees) {
+      const half = ft.w / 2;
+      const d = Math.abs(x - ft.x);
+      if (d > half + 12) continue;
+      const flatY = rawDryGround(ft.x);
+      if (d < half + 2) return Math.round(flatY);
+      const t = (d - half - 2) / 10;
+      const sm = t * t * (3 - 2 * t);
+      g = flatY * (1 - sm) + g * sm;
+    }
     return Math.round(g);
   };
 
   const ground = new Int16Array(ANTSHORE_W + 1);
   for (let x = 0; x <= ANTSHORE_W; x++) ground[x] = groundY(x);
 
-  // Lots of ants around every anthill plus roving patrols
+  // Lots of ants around every anthill plus roving patrols (keep clear of FAT_ANT_X)
   const ants: Ant[] = [];
   for (const ah of anthills) {
     const count = 2 + (rnd() < 0.65 ? 1 : 0);
     for (let i = 0; i < count; i++) {
       const ox = (i - 1) * rr(14, 24);
-      const ax = Math.max(24, Math.min(ANTSHORE_LAKE_EDGE - 80, ah.x + ox));
+      const ax = Math.max(185, Math.min(ANTSHORE_LAKE_EDGE - 80, ah.x + ox));
       const range = rr(36, 68);
       const soldier = i === 0 && rnd() < 0.55;
       const spd = soldier ? rr(22, 30) : rr(16, 25);
@@ -655,7 +699,7 @@ export function generateAntShore(seed = 1337): AntShore {
         x: ax,
         y: groundY(ax),
         vx: rnd() < 0.5 ? -spd : spd,
-        minX: Math.max(18, ax - range),
+        minX: Math.max(175, ax - range),
         maxX: Math.min(ANTSHORE_LAKE_EDGE - 75, ax + range),
         alive: true,
         respawn: 0,
@@ -676,7 +720,7 @@ export function generateAntShore(seed = 1337): AntShore {
       x: ax,
       y: groundY(ax),
       vx: rnd() < 0.5 ? -spd : spd,
-      minX: Math.max(18, ax - 55),
+      minX: Math.max(175, ax - 55),
       maxX: Math.min(ANTSHORE_LAKE_EDGE - 75, ax + 55),
       alive: true,
       respawn: 0,
@@ -687,10 +731,12 @@ export function generateAntShore(seed = 1337): AntShore {
     });
   }
 
-  // Dense dead grass, twigs, dry bushes, and pebbles
+  // Dense dead grass, twigs, dry bushes, and pebbles (keep fallen log arches clear)
+  const nearLog = (x: number) => fallenTrees.some((ft) => Math.abs(x - ft.x) < ft.w / 2 - 4);
   const decor: DeadDecor[] = [];
   for (let dx = 6; dx < ANTSHORE_LAKE_EDGE - 8; dx += 3 + Math.floor(rnd() * 4)) {
     if (nearHill(dx, 2) && rnd() < 0.7) continue;
+    if (nearLog(dx)) continue;
     const r = rnd();
     const kind: DeadDecor["kind"] =
       r < 0.68 ? "deadgrass" : r < 0.8 ? "drybush" : r < 0.9 ? "twig" : "pebble";
@@ -698,12 +744,21 @@ export function generateAntShore(seed = 1337): AntShore {
   }
 
   const pier: Platform = { x: ANTSHORE_PIER_X0, y: LAKE_Y - 8, w: ANTSHORE_PIER_W, color: 0, kind: "pier" };
+  const logPlats: Platform[] = fallenTrees.map((ft) => ({
+    x: ft.x - Math.round(ft.w / 2) + 4,
+    y: groundY(ft.x) - ft.h,
+    w: ft.w - 8,
+    color: 0,
+    kind: "fallenlog",
+  }));
 
   return {
     w: ANTSHORE_W,
     lakeEdge: ANTSHORE_LAKE_EDGE,
+    fatAntX: FAT_ANT_X,
     pier,
-    platforms: [pier],
+    platforms: [pier, ...logPlats],
+    fallenTrees,
     groundY,
     ground,
     anthills,
