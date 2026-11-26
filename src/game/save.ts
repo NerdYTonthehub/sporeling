@@ -83,3 +83,22 @@ export function parseSave(raw: string | null): SaveData | null {
     sporeSpring: o.sporeSpring === true,
   };
 }
+
+/** Merge personal abilities, fish inventory, and coins onto a player's preserved solo world save. */
+export function mergePersonalIntoSave(soloWorld: SaveData, active: SaveData): SaveData {
+  return {
+    ...soloWorld,
+    savedAt: Date.now(),
+    health: active.health,
+    hunger: active.hunger,
+    coins: active.coins,
+    inventory: { ...active.inventory },
+    fishCaught: active.fishCaught,
+    fishReleased: active.fishReleased,
+    applesEaten: active.applesEaten,
+    doubleJump: soloWorld.doubleJump || active.doubleJump,
+    sporeSpring: Boolean(soloWorld.sporeSpring || active.sporeSpring),
+    holyTries: active.holyTries ?? soloWorld.holyTries ?? 0,
+    sacrificedFish: active.sacrificedFish ? [...active.sacrificedFish] : soloWorld.sacrificedFish ?? [],
+  };
+}

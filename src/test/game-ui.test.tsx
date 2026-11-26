@@ -120,4 +120,25 @@ describe("GameScreen HUD, save, and music", () => {
     expect(screen.queryByText(/You wilted/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("42 coins")).toBeInTheDocument();
   });
+
+  it("pauses with P, exposes Party Create/Join in pause menu, and shows Controller models in Settings", () => {
+    render(<GameScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+    fireEvent.keyDown(window, { code: "KeyP" });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Party" }));
+    expect(screen.getByRole("button", { name: "Create Party" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Join Party" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back from party" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("button", { name: /Dator/i })).toBeInTheDocument();
+    const ctrlTab = screen.getByRole("button", { name: /Kontroll/i });
+    fireEvent.click(ctrlTab);
+    for (const model of ["PS5", "PS4", "Xbox", "Nintendo", "Övrigt"]) {
+      expect(screen.getByRole("radio", { name: model })).toBeInTheDocument();
+    }
+  });
 });
