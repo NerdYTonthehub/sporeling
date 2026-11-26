@@ -27,7 +27,7 @@ function ramp(param: AudioParam, value: number, time: number, duration: number):
 }
 
 function updateVolume(): void {
-  if (ctx && master) ramp(master.gain, muted ? 0 : 0.06 * volume, ctx.currentTime, 0.06);
+  if (ctx && master) ramp(master.gain, muted ? 0 : 0.19 * volume, ctx.currentTime, 0.06);
 }
 
 export function setMusicVolume(v: number): void {
@@ -318,7 +318,7 @@ function reconcile(): void {
   if (current?.name === requested || (!current && requested === null)) return;
   if (!master) {
     master = ctx.createGain();
-    master.gain.value = muted ? 0 : 0.06 * volume;
+    master.gain.value = muted ? 0 : 0.19 * volume;
     master.connect(ctx.destination);
   }
   const now = ctx.currentTime;

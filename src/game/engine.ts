@@ -71,6 +71,7 @@ import {
   type Dungeon,
 } from "./dungeon";
 import { SAVE_VERSION, type SaveData } from "./save";
+import { colorById, type PartyWorldState, type PlayerPose } from "./partyShared";
 import { FLOOR_BOTTOM, ROOM_SPAWN, atDoor, createRoom, drawRoom, moveInRoom, nearbyFurn, type Room, type RoomPlayer } from "./interior";
 import {
   BOAT_FARE,
@@ -275,6 +276,10 @@ export class Game {
   private releasingKind: "coin" | "heaven" = "coin";
   private worldSeed = 1337;
   private labels = { act: "E", jump: "Space", down: "S", attack: "F", dash: "Shift" };
+  private playerCap = "#d9443a";
+  private remotePlayers = new Map<string, { pose: PlayerPose; rx: number; ry: number }>();
+  private onPartyWorldEvent: (() => void) | null = null;
+  private onPartyDiscover: ((name: string) => void) | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -284,6 +289,109 @@ export class Game {
     if (!ctx) throw new Error("Canvas not supported");
     this.ctx = ctx;
     this.reset();
+  }
+
+  setPlayerCap(hex: string) {
+    this.playerCap = hex;
+  }
+
+  setPartyCallbacks(onWorldEvent: (() => void) | null, onDiscover: ((name: string) => void) | null) {
+    this.onPartyWorldEvent = onWorldEvent;
+    this.onPartyDiscover = onDiscover;
+  }
+
+  setRemotePlayers(poses: PlayerPose[]) {
+    const nextIds = new Set<string>();
+    for (const p of poses) {
+      nextIds.add(p.id);
+      const existing = this.remotePlayers.get(p.id);
+      if (existing) {
+        existing.pose = p;
+      } else {
+        this.remotePlayers.set(p.id, { pose: p, rx: p.x, ry: p.y });
+      }
+    }
+    for (const id of this.remotePlayers.keys()) {
+      if (!nextIds.has(id)) this.remotePlayers.delete(id);
+    }
+  }
+
+  getPartyPose(): Omit<PlayerPose, "id" | "name" | "colorId" | "updatedAt"> {
+    if (this.scene === "room") {
+      return {
+        scene: this.scene,
+        x: Math.round(this.rp.x * 10) / 10,
+        y: Math.round(this.rp.y * 10) / 10,
+        vx: 0,
+        facing: this.rp.facing === "left" ? -1 : 1,
+        walkT: Math.round(this.rp.walkT * 100) / 100,
+        onGround: true,
+      };
+    }
+    return {
+      scene: this.scene,
+      x: Math.round(this.p.x * 10) / 10,
+      y: Math.round(this.p.y * 10) / 10,
+      vx: Math.round(this.p.vx),
+      facing: this.p.facing,
+      walkT: Math.round(this.p.walkT * 100) / 100,
+      onGround: this.p.onGround,
+      attack: this.attackT > 0 ? clamp(1 - this.attackT / this.attackDur, 0, 1) : undefined,
+      dead: this.dead || undefined,
+      sitting: this.mode === "sitting" || undefined,
+      fishingPhase: this.mode === "fishing" && this.fishing ? this.fishing.phase : undefined,
+    };
+  }
+
+  getPartyWorldState(): PartyWorldState {
+    return {
+      worldSeed: this.worldSeed,
+      doorTreeIdx: Math.max(0, this.world.trees.indexOf(this.world.elder)),
+      discovered: this.world.villages.filter((v) => v.discovered).map((v) => v.name),
+      dungeonCleared: !!this.dungeon?.relicTaken,
+      godDefeated: this.godDefeated,
+    };
+  }
+
+  /** Switch into an admin's party server world without wiping the player's own abilities or fish bag. */
+  applyPartyWorld(ws: PartyWorldState, isInitialJoin = false) {
+    const curDoorIdx = Math.max(0, this.world.trees.indexOf(this.world.elder));
+    if (isInitialJoin || ws.worldSeed !== this.worldSeed || ws.doorTreeIdx !== curDoorIdx) {
+      this.worldSeed = ws.worldSeed;
+      const { world, groundY } = generateWorld(ws.worldSeed, ws.doorTreeIdx);
+      this.world = world;
+      const ground = new Int16Array(WORLD_W + 1);
+      for (let x = 0; x <= WORLD_W; x++) ground[x] = groundY(x);
+      this.forestLvl = { w: WORLD_W, ground, platforms: world.platforms, beetles: world.beetles, flyers: world.flyers };
+      this.lvl = this.forestLvl;
+      this.scene = "forest";
+      this.dungeon = null;
+      this.room = null;
+      this.heaven = null;
+      this.heavenLvl = null;
+      this.antShore = null;
+      this.antShoreLvl = null;
+      this.mode = "walk";
+      this.sittingVillage = null;
+      this.fishing = null;
+      this.releasing = null;
+      this.talking = null;
+      this.p.x = START_X;
+      this.p.y = this.groundAt(START_X);
+      this.p.vx = 0;
+      this.p.vy = 0;
+      this.p.onGround = true;
+      this.p.plat = null;
+      this.snapCamera();
+    }
+    for (const v of this.world.villages) {
+      v.discovered = ws.discovered.includes(v.name);
+    }
+    this.godDefeated = ws.godDefeated;
+    if (ws.dungeonCleared && this.dungeon) {
+      this.dungeon.relicTaken = true;
+    }
+    this.emitHud();
   }
 
   // ---------- lifecycle ----------
@@ -538,6 +646,13 @@ export class Game {
 
   // ---------- update ----------
   private update(dt: number) {
+    if (this.remotePlayers.size > 0) {
+      const blend = Math.min(1, dt * 14);
+      for (const r of this.remotePlayers.values()) {
+        r.rx += (r.pose.x - r.rx) * blend;
+        r.ry += (r.pose.y - r.ry) * blend;
+      }
+    }
     if (this.paused) {
       this.pressed.clear();
       return;
@@ -865,6 +980,8 @@ export class Game {
       for (const v of this.world.villages) {
         if (!v.discovered && Math.abs(p.x - v.x) < v.half && Math.abs(p.y - this.villageFloor(v)) < 40 && active) {
           v.discovered = true;
+          this.onPartyDiscover?.(v.name);
+          this.onPartyWorldEvent?.();
           const found = this.world.villages.filter((x) => x.discovered).length;
           const total = this.world.villages.length;
           this.banner = {
@@ -1073,7 +1190,7 @@ export class Game {
     const A = this.labels.act;
     const onFloor = p.onGround && !p.plat;
     const cap = onFloor ? d.glowcaps.find((gc) => !gc.eaten && Math.abs(gc.x - p.x) < 9) : undefined;
-    const shrine = onFloor && !d.relicTaken && Math.abs(p.x - d.shrineX) < 14;
+    const shrine = onFloor && !this.hasDoubleJump && Math.abs(p.x - d.shrineX) < 14;
     const door = onFloor && (Math.abs(p.x - d.entryX) < 14 || Math.abs(p.x - d.exitX) < 14);
     if (this.talking) this.prompt = `${A} · next`;
     else if (shrine) this.prompt = `${A} · take the Winged Spore`;
@@ -1098,6 +1215,7 @@ export class Game {
     d.relicTaken = true;
     this.hasDoubleJump = true;
     this.airJumps = 1;
+    this.onPartyWorldEvent?.();
     sfx.discover();
     this.shakeT = 0.3;
     for (let i = 0; i < 30; i++) {
@@ -2041,6 +2159,7 @@ export class Game {
       this.inventory = outcome.inventory;
       this.holyTries = outcome.holyTries;
       this.godDefeated = true;
+      this.onPartyWorldEvent?.();
       sfx.discover();
       sfx.release();
       this.shakeT = 0.45;
@@ -2292,6 +2411,7 @@ export class Game {
     drawHeavenFloor(ctx, h, this.W, this.H);
     drawHeavenEffects(ctx, h);
     this.drawShockwaves(0, 0);
+    this.drawRemotePlayers("heaven", 0, 0);
     const p = this.p;
     if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
       drawMushroomPerson(ctx, Math.round(p.x), Math.round(p.y), {
@@ -2299,7 +2419,7 @@ export class Game {
         walk: p.walkT,
         moving: Math.abs(p.vx) > 4,
         air: !p.onGround,
-        cap: "#d9443a",
+        cap: this.playerCap,
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,
@@ -2310,6 +2430,43 @@ export class Game {
     this.drawAttack(0, 0);
     this.drawParticles(0, 0, false);
     this.drawParticles(0, 0, true);
+  }
+
+  private drawRemotePlayers(scene: Scene, cx: number, cy: number) {
+    if (this.remotePlayers.size === 0) return;
+    const ctx = this.ctx;
+    for (const r of this.remotePlayers.values()) {
+      const rp = r.pose;
+      if (rp.scene !== scene) continue;
+      const sx = Math.round(r.rx - cx);
+      const sy = Math.round(r.ry - cy);
+      if (sx < -24 || sx > this.W + 24) continue;
+      const col = colorById(rp.colorId).hex;
+      if (rp.dead) ctx.globalAlpha = 0.65;
+      drawMushroomPerson(ctx, sx, sy, {
+        facing: rp.facing,
+        walk: rp.walkT,
+        moving: Math.abs(rp.vx) > 4,
+        air: !rp.onGround,
+        cap: col,
+        spots: true,
+        scale: 1,
+        blink: !!rp.dead,
+        sitting: rp.sitting,
+        attack: rp.attack,
+        fishing: rp.fishingPhase ? { phase: rp.fishingPhase, t: this.time } : undefined,
+      });
+      ctx.globalAlpha = 1;
+      ctx.font = "6px monospace";
+      ctx.textAlign = "center";
+      const label = rp.name;
+      const tw = Math.min(48, label.length * 4 + 4);
+      rect(ctx, "rgba(18,12,8,0.68)", sx - Math.round(tw / 2), sy - 27, tw, 7);
+      rect(ctx, col, sx - Math.round(tw / 2), sy - 27, 2, 7);
+      ctx.fillStyle = "#f4edd8";
+      ctx.fillText(label, sx + 1, sy - 21);
+      ctx.textAlign = "left";
+    }
   }
 
   private spawn(o: Omit<Particle, "max" | "phase"> & { phase?: number }) {
@@ -2450,7 +2607,17 @@ export class Game {
   // ---------- render ----------
   private render() {
     if (this.scene === "room" && this.room) {
-      drawRoom(this.ctx, this.room, this.W, this.H, this.rp, this.time, this.darkness());
+      const remotes = Array.from(this.remotePlayers.values())
+        .filter((r) => r.pose.scene === "room")
+        .map((r) => ({
+          x: r.rx,
+          y: r.ry,
+          facing: r.pose.facing,
+          walk: r.pose.walkT,
+          cap: colorById(r.pose.colorId).hex,
+          name: r.pose.name,
+        }));
+      drawRoom(this.ctx, this.room, this.W, this.H, this.rp, this.time, this.darkness(), this.playerCap, remotes);
     } else if (this.scene === "dungeon" && this.dungeon) {
       this.renderDungeon(this.dungeon);
     } else if (this.scene === "heaven" && this.heaven) {
@@ -2480,6 +2647,7 @@ export class Game {
     drawShrine(ctx, d, cx, cy, this.time);
     this.drawEnemies(cx, cy);
     this.drawShockwaves(cx, cy);
+    this.drawRemotePlayers("dungeon", cx, cy);
     const p = this.p;
     if (p.invuln <= 0 || Math.floor(this.time * 18) % 2 !== 0) {
       drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), {
@@ -2487,7 +2655,7 @@ export class Game {
         walk: p.walkT,
         moving: Math.abs(p.vx) > 4,
         air: !p.onGround,
-        cap: "#d9443a",
+        cap: this.playerCap,
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,
@@ -2672,6 +2840,7 @@ export class Game {
     const p = this.p;
     const sink = Math.round(this.puddleSink);
     const blinkHurt = p.invuln > 0 && Math.floor(this.time * 18) % 2 === 0;
+    this.drawRemotePlayers("forest", cx, cy);
     if (!blinkHurt) {
       const px = Math.round(p.x - cx);
       const py = Math.round(p.y - cy);
@@ -2683,7 +2852,7 @@ export class Game {
         walk: p.walkT,
         moving: Math.abs(p.vx) > 4,
         air: !p.onGround,
-        cap: "#d9443a",
+        cap: this.playerCap,
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,
@@ -2903,13 +3072,14 @@ export class Game {
 
     // Player & combat
     const blinkHurt = p.invuln > 0 && Math.floor(this.time * 18) % 2 === 0;
+    this.drawRemotePlayers("antshore", cx, cy);
     if (!blinkHurt) {
       drawMushroomPerson(ctx, Math.round(p.x - cx), Math.round(p.y - cy), {
         facing: p.facing,
         walk: p.walkT,
         moving: Math.abs(p.vx) > 4,
         air: !p.onGround,
-        cap: "#d9443a",
+        cap: this.playerCap,
         spots: true,
         scale: 1,
         blink: this.dead || p.blinkT < 0,

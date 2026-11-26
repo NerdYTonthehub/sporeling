@@ -546,7 +546,17 @@ export interface RoomPlayer {
   moving: boolean;
 }
 
-export function drawRoom(ctx: Ctx, room: Room, W: number, H: number, pl: RoomPlayer, t: number, night: number) {
+export function drawRoom(
+  ctx: Ctx,
+  room: Room,
+  W: number,
+  H: number,
+  pl: RoomPlayer,
+  t: number,
+  night: number,
+  playerCap = "#d9443a",
+  remotes: { x: number; y: number; facing: number; walk: number; cap: string; name: string }[] = [],
+) {
   const ox = Math.round((W - ROOM_W) / 2);
   const oy = Math.round((H - ROOM_H) / 2) + 4;
   // surroundings: the inside of a big mushroom stem
@@ -596,6 +606,27 @@ export function drawRoom(ctx: Ctx, room: Room, W: number, H: number, pl: RoomPla
     })();
     if (d) sortables.push({ y: f.y + f.h, draw: d });
   }
+  for (const r of remotes) {
+    sortables.push({
+      y: r.y,
+      draw: () => {
+        const rx = Math.round(ox + r.x);
+        const ry = Math.round(oy + r.y);
+        ctx.fillStyle = "rgba(0,0,0,0.22)";
+        ctx.fillRect(rx - 5, ry - 1, 10, 2);
+        drawMushroomPerson(ctx, rx, ry, {
+          facing: r.facing,
+          walk: r.walk,
+          moving: false,
+          air: false,
+          cap: r.cap,
+          spots: true,
+          view: "front",
+          blink: false,
+        });
+      },
+    });
+  }
   sortables.push({
     y: pl.y,
     draw: () => {
@@ -608,7 +639,7 @@ export function drawRoom(ctx: Ctx, room: Room, W: number, H: number, pl: RoomPla
         walk: pl.walkT,
         moving: pl.moving,
         air: false,
-        cap: "#d9443a",
+        cap: playerCap,
         spots: true,
         view: pl.facing === "up" ? "back" : pl.facing === "down" ? "front" : "side",
         blink: (t % 4) < 0.12,

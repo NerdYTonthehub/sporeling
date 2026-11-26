@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, VIEW_H, type HudState, type Key } from "@/game/engine";
+import { pollConnectedGamepads } from "@/game/gamepad";
 import { playMusic, setMusicMuted, setMusicVolume } from "@/game/music";
-import { AUTOSAVE_SECONDS, SAVE_KEY, parseSave, type SaveData } from "@/game/save";
+import { PartyClient, type PartyStateView } from "@/game/party";
+import { colorById } from "@/game/partyShared";
+import { AUTOSAVE_SECONDS, SAVE_KEY, mergePersonalIntoSave, parseSave, type SaveData } from "@/game/save";
 import { initAudio, setMuted, setVolume, sfx } from "@/game/sfx";
+import {
+  DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
+  actionForCode,
+  actionsForPadCodes,
+  parseSettings,
+  primaryLabel,
+  type Action,
+  type Settings,
+} from "@/game/settings";
 import { TOTAL_VILLAGES } from "@/game/world";
 import { PixelIcon } from "./PixelIcon";
 import { InventoryPanel } from "./Inventory";
 import { GameButton } from "./GameButton";
+import { PartyPanel } from "./PartyPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, actionForCode, parseSettings, primaryLabel, type Settings } from "@/game/settings";
 
 function Bar({ value, icon, label, fill, dim, warn }: { value: number; icon: "heart" | "apple"; label: string; fill: string; dim: string; warn?: boolean }) {
   const segments = 10;
@@ -31,17 +44,22 @@ export function GameScreen() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<Game | null>(null);
+  const partyRef = useRef<PartyClient | null>(null);
+  const soloSaveRef = useRef<SaveData | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [started, setStarted] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [menu, setMenu] = useState<"main" | "pause" | "settings" | null>("main");
+  const [menu, setMenu] = useState<"main" | "pause" | "settings" | "party" | null>("main");
+  const [party, setParty] = useState<PartyStateView | null>(null);
   const [ready, setReady] = useState(false);
   const [savedGame, setSavedGame] = useState<SaveData | null>(null);
   const [saveNotice, setSaveNotice] = useState(false);
   const menuRef = useRef(menu);
   const settingsRef = useRef(settings);
+  const partyViewRef = useRef(party);
   menuRef.current = menu;
   settingsRef.current = settings;
+  partyViewRef.current = party;
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [touch, setTouch] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
@@ -49,6 +67,8 @@ export function GameScreen() {
   const startedRef = useRef(false);
   const deadRef = useRef(false);
   const sittingRef = useRef<HudState["sitting"]>(null);
+  const kbDownRef = useRef<Set<Action>>(new Set());
+  const gpDownRef = useRef<Set<Action>>(new Set());
   invOpenRef.current = invOpen;
   startedRef.current = started;
   deadRef.current = !!hud?.dead;
@@ -79,13 +99,24 @@ export function GameScreen() {
 
   useEffect(() => {
     gameRef.current?.setPaused(menu !== null || invOpen);
+    kbDownRef.current.clear();
+    gpDownRef.current.clear();
     gameRef.current?.clearKeys();
   }, [menu, invOpen]);
 
   const saveGame = useCallback(() => {
     const g = gameRef.current;
     if (!g || !startedRef.current) return false;
-    const snap = g.snapshot();
+    const active = g.snapshot();
+    const curParty = partyViewRef.current;
+    // Keep personal abilities and fish bag, while never overwriting solo world progress with a friend's server!
+    const snap =
+      curParty && !curParty.isAdmin && soloSaveRef.current
+        ? mergePersonalIntoSave(soloSaveRef.current, active)
+        : active;
+    if (curParty && !curParty.isAdmin && soloSaveRef.current) {
+      soloSaveRef.current = snap;
+    }
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(snap));
       setSavedGame(snap);
@@ -111,7 +142,10 @@ export function GameScreen() {
     const onHide = () => {
       if (document.visibilityState === "hidden") saveGame();
     };
-    const onUnload = () => saveGame();
+    const onUnload = () => {
+      saveGame();
+      void partyRef.current?.leave();
+    };
     document.addEventListener("visibilitychange", onHide);
     window.addEventListener("pagehide", onUnload);
     return () => {
@@ -132,6 +166,31 @@ export function GameScreen() {
     if (!canvas || !wrap) return;
     const game = new Game(canvas, setHud);
     gameRef.current = game;
+    const pc = new PartyClient({
+      onState: (view) => {
+        setParty(view);
+        if (view) {
+          game.setPlayerCap(colorById(view.myColorId).hex);
+        } else {
+          game.setRemotePlayers([]);
+        }
+      },
+      onWorldSync: (ws) => {
+        game.applyPartyWorld(ws, false);
+      },
+      getLocalPose: () => game.getPartyPose(),
+    });
+    partyRef.current = pc;
+    game.setPartyCallbacks(
+      () => {
+        if (partyViewRef.current?.isAdmin) {
+          pc.updateAdminWorldState(game.getPartyWorldState());
+        }
+      },
+      (villageName) => {
+        pc.notifyDiscoveredVillage(villageName);
+      },
+    );
     if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
     const fit = () => {
       const cw = wrap.clientWidth;
@@ -148,14 +207,36 @@ export function GameScreen() {
     game.mount();
     setTouch(window.matchMedia("(pointer: coarse)").matches);
 
+    const syncAction = (action: Action) => {
+      if (action === "bag") return;
+      game.setKey(action, kbDownRef.current.has(action) || gpDownRef.current.has(action));
+    };
+
+    const togglePauseShortcut = () => {
+      game.clearKeys();
+      kbDownRef.current.clear();
+      gpDownRef.current.clear();
+      if (invOpenRef.current) setInvOpen(false);
+      else if (sittingRef.current) game.standUp();
+      else if (menuRef.current === "settings" || menuRef.current === "party") {
+        setMenu(startedRef.current ? "pause" : "main");
+      } else if (startedRef.current) {
+        setMenu(menuRef.current === "pause" ? null : "pause");
+      }
+    };
+
     const down = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "Escape") {
         e.preventDefault();
-        game.clearKeys();
-        if (invOpenRef.current) setInvOpen(false);
-        else if (sittingRef.current) game.standUp();
-        else if (menuRef.current === "settings") setMenu(startedRef.current ? "pause" : "main");
-        else if (startedRef.current) setMenu(menuRef.current === "pause" ? null : "pause");
+        togglePauseShortcut();
+        return;
+      }
+      if (e.code === "KeyP" && !e.repeat) {
+        if (menuRef.current === null || menuRef.current === "pause") {
+          e.preventDefault();
+          togglePauseShortcut();
+        }
         return;
       }
       if (menuRef.current !== null || deadRef.current) return;
@@ -175,26 +256,120 @@ export function GameScreen() {
       if (action === "bag") {
         if (e.repeat) return;
         game.clearKeys();
+        kbDownRef.current.clear();
         setInvOpen((open) => !open);
-      } else if (!invOpenRef.current) game.setKey(action, true);
+      } else if (!invOpenRef.current) {
+        kbDownRef.current.add(action);
+        syncAction(action);
+      }
     };
     const up = (e: KeyboardEvent) => {
       const action = actionForCode(settingsRef.current.keys, e.code);
-      if (action && action !== "bag") game.setKey(action, false);
+      if (action && action !== "bag") {
+        kbDownRef.current.delete(action);
+        syncAction(action);
+      }
     };
-    const blur = () => game.clearKeys();
+    const blur = () => {
+      kbDownRef.current.clear();
+      gpDownRef.current.clear();
+      game.clearKeys();
+    };
+
+    // Real browser Gamepad polling loop (idle-free when no controller is connected)
+    let gpRaf = 0;
+    let prevStart = false;
+    let prevPadActions = new Set<Action>();
+    const pollGamepad = () => {
+      const { codes, count } = pollConnectedGamepads();
+      if (count === 0) {
+        gpRaf = 0;
+        if (gpDownRef.current.size > 0) {
+          const prev = Array.from(gpDownRef.current);
+          gpDownRef.current.clear();
+          prev.forEach(syncAction);
+        }
+        prevStart = false;
+        prevPadActions = new Set();
+        return;
+      }
+      if (codes.size > 0) initAudio();
+      const startPressed = codes.has("gp:b9");
+      if (startPressed && !prevStart && menuRef.current !== "settings") {
+        togglePauseShortcut();
+      }
+      prevStart = startPressed;
+
+      if (menuRef.current === null && startedRef.current && !deadRef.current) {
+        const nextActions = actionsForPadCodes(settingsRef.current.padKeys, codes);
+        if (nextActions.has("bag") && !prevPadActions.has("bag")) {
+          game.clearKeys();
+          kbDownRef.current.clear();
+          gpDownRef.current.clear();
+          setInvOpen((open) => !open);
+        } else if (!invOpenRef.current) {
+          for (const a of nextActions) {
+            if (a !== "bag" && !gpDownRef.current.has(a)) {
+              gpDownRef.current.add(a);
+              syncAction(a);
+            }
+          }
+          for (const a of Array.from(gpDownRef.current)) {
+            if (!nextActions.has(a)) {
+              gpDownRef.current.delete(a);
+              syncAction(a);
+            }
+          }
+        }
+        prevPadActions = nextActions;
+      } else {
+        if (gpDownRef.current.size > 0) {
+          const prev = Array.from(gpDownRef.current);
+          gpDownRef.current.clear();
+          prev.forEach(syncAction);
+        }
+        prevPadActions = new Set();
+      }
+      gpRaf = window.requestAnimationFrame(pollGamepad);
+    };
+    const startGpLoop = () => {
+      if (!gpRaf) gpRaf = window.requestAnimationFrame(pollGamepad);
+    };
+    const gpCheckInterval = window.setInterval(() => {
+      if (!gpRaf && pollConnectedGamepads().count > 0) startGpLoop();
+    }, 1000);
+    if (pollConnectedGamepads().count > 0) startGpLoop();
+
+    window.addEventListener("gamepadconnected", startGpLoop);
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
     return () => {
       ro.disconnect();
       playMusic(null);
+      if (gpRaf) window.cancelAnimationFrame(gpRaf);
+      window.clearInterval(gpCheckInterval);
+      window.removeEventListener("gamepadconnected", startGpLoop);
+      pc.destroy();
       game.destroy();
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
   }, []);
+
+  // Lightweight Party pose & remote mushroom interpolation target sync (zero overhead when solo)
+  useEffect(() => {
+    if (!party) return;
+    const id = window.setInterval(() => {
+      const pc = partyRef.current;
+      const g = gameRef.current;
+      if (!pc || !g) return;
+      if (menuRef.current === null) pc.tickPose();
+      g.setRemotePlayers(pc.getRemotePoses());
+    }, 45);
+    return () => window.clearInterval(id);
+  }, [party]);
 
   const start = useCallback(() => {
     initAudio();
@@ -207,6 +382,9 @@ export function GameScreen() {
   const newGame = useCallback(() => {
     initAudio();
     setInvOpen(false);
+    soloSaveRef.current = null;
+    void partyRef.current?.leave();
+    gameRef.current?.setPlayerCap("#d9443a");
     gameRef.current?.restart();
     setStarted(true);
     setMenu(null);
@@ -216,6 +394,9 @@ export function GameScreen() {
     if (!savedGame) return;
     initAudio();
     setInvOpen(false);
+    soloSaveRef.current = null;
+    void partyRef.current?.leave();
+    gameRef.current?.setPlayerCap("#d9443a");
     gameRef.current?.loadSave(savedGame);
     setStarted(true);
     setMenu(null);
@@ -231,6 +412,68 @@ export function GameScreen() {
   const releaseFish = useCallback((id: string) => {
     initAudio();
     if (gameRef.current?.releaseFish(id)) setInvOpen(false);
+  }, []);
+
+  const createParty = useCallback(async (name: string, colorId: string) => {
+    const g = gameRef.current;
+    const pc = partyRef.current;
+    if (!g || !pc) return;
+    const view = await pc.create(name, colorId, g.getPartyWorldState());
+    g.setPlayerCap(colorById(view.myColorId).hex);
+  }, []);
+
+  const previewParty = useCallback(async (code: string) => {
+    const pc = partyRef.current;
+    if (!pc) throw new Error("Party unavailable");
+    return pc.preview(code);
+  }, []);
+
+  const joinParty = useCallback(async (code: string, name: string, colorId: string) => {
+    const g = gameRef.current;
+    const pc = partyRef.current;
+    if (!g || !pc) return;
+    // Preserve player's own solo world before entering the admin's server
+    if (!partyViewRef.current || partyViewRef.current.isAdmin) {
+      const solo = g.snapshot();
+      soloSaveRef.current = solo;
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(solo));
+        setSavedGame(solo);
+      } catch {
+        /* Ignore storage quota failure. */
+      }
+    }
+    const view = await pc.join(code, name, colorId);
+    g.setPlayerCap(colorById(view.myColorId).hex);
+    g.applyPartyWorld(view.worldState, true);
+  }, []);
+
+  const changePartyColor = useCallback(async (colorId: string) => {
+    await partyRef.current?.changeColor(colorId);
+  }, []);
+
+  const leaveParty = useCallback(async () => {
+    const g = gameRef.current;
+    const pc = partyRef.current;
+    const wasGuest = !!partyViewRef.current && !partyViewRef.current.isAdmin;
+    if (g && wasGuest && soloSaveRef.current) {
+      const merged = mergePersonalIntoSave(soloSaveRef.current, g.snapshot());
+      soloSaveRef.current = null;
+      await pc?.leave();
+      g.setPlayerCap("#d9443a");
+      g.setRemotePlayers([]);
+      g.loadSave(merged);
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(merged));
+        setSavedGame(merged);
+      } catch {
+        /* Ignore storage quota failure. */
+      }
+    } else {
+      await pc?.leave();
+      g?.setPlayerCap("#d9443a");
+      g?.setRemotePlayers([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -251,6 +494,10 @@ export function GameScreen() {
   const toggleMute = () => setSettings((current) => ({ ...current, sound: !current.sound }));
   const exitToMenu = () => {
     saveGame();
+    void partyRef.current?.leave();
+    soloSaveRef.current = null;
+    gameRef.current?.setPlayerCap("#d9443a");
+    gameRef.current?.setRemotePlayers([]);
     gameRef.current?.stop();
     gameRef.current?.clearKeys();
     setStarted(false);
@@ -451,7 +698,20 @@ export function GameScreen() {
           {/* Menus */}
           {menu !== null && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60">
-              {menu === "settings" ? <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setMenu(started ? "pause" : "main")} /> : (
+              {menu === "settings" ? (
+                <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setMenu(started ? "pause" : "main")} />
+              ) : menu === "party" ? (
+                <PartyPanel
+                  party={party}
+                  myColorId={party?.myColorId ?? "red"}
+                  onCreate={createParty}
+                  onPreview={previewParty}
+                  onJoin={joinParty}
+                  onChangeColor={changePartyColor}
+                  onLeave={leaveParty}
+                  onClose={() => setMenu(started ? "pause" : "main")}
+                />
+              ) : (
                 <div className="flex max-h-full flex-col items-center gap-3 overflow-y-auto px-6 py-4 text-center">
                   <div className="animate-bob"><PixelIcon name="shroom" size={48} /></div>
                   <h1 className="font-display text-2xl text-accent drop-shadow-[4px_4px_0_var(--color-border)] sm:text-4xl">{menu === "main" ? "SPORELING" : "Paused"}</h1>
@@ -471,8 +731,13 @@ export function GameScreen() {
                     <GameButton disabled={!ready} onClick={start} className="w-56 px-6 py-4 text-sm">{menu === "main" ? "Play" : "Resume"}</GameButton>
                   )}
                   {menu === "pause" && (
+                    <GameButton onClick={() => setMenu("party")} className="w-56 px-4 py-3 text-xs">
+                      {party ? `Party (${party.members.length}/10 · ${party.code})` : "Party"}
+                    </GameButton>
+                  )}
+                  {menu === "pause" && (
                     <GameButton onClick={manualSave} className="w-56 px-6 py-3 text-xs">
-                      {saveNotice ? "Saved!" : "Save game"}
+                      {saveNotice ? "Saved!" : party && !party.isAdmin ? "Save my progress" : "Save game"}
                     </GameButton>
                   )}
                   <GameButton onClick={() => setMenu("settings")} className="w-56 px-6 py-4 text-sm">Settings</GameButton>

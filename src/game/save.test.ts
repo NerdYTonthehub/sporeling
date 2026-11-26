@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTOSAVE_SECONDS, SAVE_VERSION, parseSave, type SaveData } from "./save";
+import { AUTOSAVE_SECONDS, SAVE_VERSION, mergePersonalIntoSave, parseSave, type SaveData } from "./save";
 import { LAKE_MIN_X } from "./world";
 
 const sample: SaveData = {
@@ -52,5 +52,17 @@ describe("save games", () => {
   });
   it("autosaves every 30 seconds", () => {
     expect(AUTOSAVE_SECONDS).toBe(30);
+  });
+  it("keeps personal abilities and fish inventory when merging back onto a solo world save", () => {
+    const merged = mergePersonalIntoSave(
+      { ...sample, worldSeed: 42, discovered: ["Mossbottom"], doubleJump: false, sporeSpring: false, inventory: { minnow: 1 }, coins: 10 },
+      { ...sample, worldSeed: 999, discovered: ["Gillhollow", "Cloudcap"], doubleJump: true, sporeSpring: true, inventory: { minnow: 1, koi: 2 }, coins: 75 },
+    );
+    expect(merged.worldSeed).toBe(42);
+    expect(merged.discovered).toEqual(["Mossbottom"]);
+    expect(merged.doubleJump).toBe(true);
+    expect(merged.sporeSpring).toBe(true);
+    expect(merged.inventory).toEqual({ minnow: 1, koi: 2 });
+    expect(merged.coins).toBe(75);
   });
 });
